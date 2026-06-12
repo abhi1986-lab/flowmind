@@ -267,6 +267,94 @@ Implemented the next foundation slice per development order and constraints.
   - POST /agent/sessions/:id/stop → session.update status + endedAt in client DB.
   - POST /agent/events/batch → createMany events linked to the sessionId in client DB.
 - /agent/config left as stub (policy can be next within this slice if desired).
+
+## SOP Review + Minimal SOP Viewer (current slice - lean human review loop)
+
+Completed the minimum for SOP review and a basic viewer workbench.
+
+### A. What was built
+- **SOP read APIs** (added to agent controller):
+  - GET /agent/sessions/:id/timeline — returns the stored workflow/timeline draft (steps, title) from client DB.
+  - GET /agent/sessions/:id/sop — returns the linked SopDocument (status + full content) from client DB.
+- **SOP review APIs** (on /agent/sop-documents/:id ):
+  - PATCH — edit title and/or content JSON (allowed only while DRAFT or IN_REVIEW).
+  - POST /submit-review — transitions DRAFT → IN_REVIEW.
+  - POST /approve — transitions IN_REVIEW → APPROVED (gated by REVIEW_SOP permission or REVIEWER/CLIENT_ADMIN role from JWT/scope).
+  - POST /reject — transitions to REJECTED (accepts optional `reason` in body; same permission gate; reason merged into content).
+- **Minimal web viewer** (dev/demo only, explicitly not polished):
+  - New route/page: /sop-viewer (apps/web/app/sop-viewer/page.tsx).
+  - Login buttons for the 3 demo users (contributor/reviewer/admin) + token display/input.
+  - Session ID input + "Fetch Timeline & SOP" (calls the new GETs with Bearer + X-Client-Id: acme).
+  - Displays timeline as numbered steps list + raw.
+  - Displays SOP with status, title, and sections.
+  - Editable textarea (full content JSON) + Save button (does PATCH).
+  - Action buttons: Submit for Review, Approve, Reject (text input for reject reason).
+  - All actions refetch after success. Pure functional React, no extra deps or styling beyond basic.
+- Basic permissions: View for any same-client authenticated user (via existing guards). Approve/reject explicitly check REVIEW_SOP or appropriate role in the controller (using accessScope from guard).
+- All data operations go through clientPrisma (from resolver/guard) → client DB only.
+- No changes to control plane, no new operational tables there.
+- Used existing Workflow/SopDocument models + status field.
+- 4 small logical commits on the feature branch (controller extensions, web page, MD update).
+
+### B. What was deliberately deferred
+- Desktop capture / real desktop agent (validation uses manual API calls via curl as before).
+- Real LLM (still 100% deterministic template from previous slice; no AI integration).
+- Any analytics, task mining depth, automation.
+- Billing/SSO/MFA/K8s/enterprise.
+- Polished dashboard or production UI (this is "very basic" dev workbench only).
+- Over-audit or compliance features.
+- Full RBAC UI or advanced permission modeling (lean check only).
+- Auto anything for SOPs (status changes are explicit human actions only).
+- New branches, history changes, or deletion of prior files.
+
+### C. Files changed
+- apps/api-server/src/modules/agent/agent-sessions.controller.ts (added the 2 GET read + 4 review action methods)
+- apps/web/app/sop-viewer/page.tsx (new minimal viewer page)
+- FOUNDATION_STATUS.md (this section + prior preservation)
+
+### D. Exact validation outputs
+Executed the exact 18-step sequence (after typecheck/lint/build passed):
+- Login: 201, token with real client_id from control.
+- Create session → real ID.
+- Upload safe events (4 events, no typedText/raw) → 201 accepted.
+- Stop.
+- Build timeline → 200 with steps.
+- Generate SOP → 200, DRAFT.
+- GET /timeline → 200 with steps.
+- GET /sop → 200 with content + DRAFT status.
+- PATCH (edit content) → 200, content updated.
+- Submit for review → 201, status IN_REVIEW.
+- Approve → 201, status APPROVED.
+- Separate flow for reject (new session or second draft): submit → reject with reason → 201, status REJECTED + reason in content.
+- Client DB queries (psql): sessions/events present with data; workflows with steps; sop_documents with correct status transitions (DRAFT→IN_REVIEW→APPROVED, and DRAFT→REJECTED with reason).
+- Control DB: only acme client metadata. No sessions/events/sop_documents tables or data (relation errors on count queries).
+
+All calls used valid tokens + X-Client-Id: acme. Guard isolation and permission checks worked (mismatch 403, no-JWT 401, no-header 400; approve/reject succeeded only with reviewer/admin).
+
+### E. UI route/page created
+- apps/web/app/sop-viewer/page.tsx : The minimal workbench exactly as scoped. Runs at http://localhost:3000/sop-viewer (when web dev server is up alongside API on 4000). Functional for the review loop demo.
+
+### F. Client DB proof
+Post full flow + review actions:
+- Real session, events, workflow, and sop_document records with correct foreign keys and data.
+- SopDocument.status correctly moves through DRAFT, IN_REVIEW, APPROVED (and REJECTED in separate flow).
+- PATCH updates reflected in content.
+- (Confirmed via the psql selects in the validation command; data present and consistent with actions.)
+
+### G. Control DB isolation proof
+- Only "acme" in clients table + corresponding route/license.
+- Queries for sessions, events, workflows, sop_documents return "relation does not exist" (tables never created in control DB).
+- Zero operational data (confirmed in the validation psql section).
+
+### H. Final status
+**SOP Review + Minimal Viewer passed.**
+
+All rules followed. Baseline checks passed before and after code. Small commits. Working tree clean. The human review loop (read + edit + submit/approve/reject with status) is now complete as the minimum for this slice. The /sop-viewer provides the required basic workbench. No scope violations. The core MVP value chain now supports full review.
+
+**Current branch:** feature/client-data-plane-session-events (clean)
+**Tag:** foundation-db-backed-v0 (pushed on baseline)
+
+This slice is complete. Do not proceed to further features without explicit next instruction.
 - Client DB tables applied via `prisma db push` against the client-a connection string (for local dev validation; production would use proper migrations per client).
 - Connection string in the seeded client_route was adjusted (host-mapped port) so the host-run api-server can reach the Dockerized client-a DB.
 - All DB operations use the live route record from control DB (real findUnique in resolver for 'acme' from X-Client-Id or host).
