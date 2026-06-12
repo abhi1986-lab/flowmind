@@ -88,3 +88,83 @@ model PlatformAuditLog {
   @@map("platform_audit_logs")
 }
 
+// ============================================================
+// CLIENT DATA PLANE MODELS (per-client DB)
+// These live ONLY in client-specific databases (e.g. client_a_db).
+// Control plane has no knowledge of these tables.
+// ============================================================
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String?
+  role      String   @default("CONTRIBUTOR")
+  status    String   @default("active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  sessions Session[]
+
+  @@map("users")
+}
+
+model CapturePolicy {
+  id                 String   @id @default(uuid())
+  screenshotsEnabled Boolean  @default(true) @map("screenshots_enabled")
+  appBlocklist       Json     @default("[]") @map("app_blocklist")
+  windowBlocklist    Json     @default("[]") @map("window_blocklist")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@map("capture_policies")
+}
+
+model Session {
+  id                 String   @id @default(uuid())
+  userId             String   @map("user_id")
+  status             String   @default("CREATED")
+  startedAt          DateTime @default(now()) @map("started_at")
+  endedAt            DateTime? @map("ended_at")
+  sourceAgentVersion String?  @map("source_agent_version")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  user      User      @relation(fields: [userId], references: [id])
+  events    Event[]
+  artifacts Artifact[]
+
+  @@map("sessions")
+}
+
+model Event {
+  id          String   @id @default(uuid())
+  sessionId   String   @map("session_id")
+  sequenceNo  Int      @map("sequence_no")
+  eventType   String   @map("event_type")
+  timestamp   DateTime
+  appName     String?  @map("app_name")
+  windowTitle String?  @map("window_title")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  session   Session    @relation(fields: [sessionId], references: [id])
+  artifacts Artifact[]
+
+  @@map("events")
+}
+
+model Artifact {
+  id           String   @id @default(uuid())
+  sessionId    String   @map("session_id")
+  eventId      String?  @map("event_id")
+  storageKey   String   @map("storage_key")
+  artifactType String   @map("artifact_type")
+  hash         String?
+  sizeBytes    Int      @map("size_bytes")
+  uploadStatus String   @default("pending") @map("upload_status")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  session Session @relation(fields: [sessionId], references: [id])
+  event   Event?  @relation(fields: [eventId], references: [id])
+
+  @@map("artifacts")
+}
+
