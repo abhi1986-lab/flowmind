@@ -256,4 +256,172 @@ export class AgentSessionsController {
       clientId: scope?.clientId,
     };
   }
+
+  // A. SOP read APIs (lean)
+  @Get('sessions/:id/timeline')
+  async getTimeline(@Param('id') sessionId: string, @Req() req: AuthenticatedRequest) {
+    const scope = req.accessScope;
+    const clientPrisma = req.clientPrisma!;
+
+    const workflow = await clientPrisma.workflow.findFirst({
+      where: { sourceSessionId: sessionId },
+    });
+
+    if (!workflow) {
+      return { sessionId, message: 'No timeline found for session' };
+    }
+
+    return {
+      workflowId: workflow.id,
+      sessionId,
+      title: workflow.title,
+      steps: workflow.steps,
+      clientId: scope?.clientId,
+    };
+  }
+
+  @Get('sessions/:id/sop')
+  async getSop(@Param('id') sessionId: string, @Req() req: AuthenticatedRequest) {
+    const scope = req.accessScope;
+    const clientPrisma = req.clientPrisma!;
+
+    const workflow = await clientPrisma.workflow.findFirst({
+      where: { sourceSessionId: sessionId },
+    });
+
+    if (!workflow) {
+      return { sessionId, message: 'No SOP found for session' };
+    }
+
+    const sop = await clientPrisma.sopDocument.findFirst({
+      where: { workflowId: workflow.id },
+    });
+
+    if (!sop) {
+      return { sessionId, workflowId: workflow.id, message: 'No SOP draft' };
+    }
+
+    return {
+      sopDocumentId: sop.id,
+      workflowId: workflow.id,
+      sessionId,
+      status: sop.status,
+      sop: sop.content,
+      clientId: scope?.clientId,
+    };
+  }
+
+  // B. SOP review APIs (lean, require basic reviewer role/permission for approve/reject)
+  @Patch('sop-documents/:id')
+  async updateSopDraft(
+    @Param('id') id: string,
+    @Body() body: { title?: string; content?: any },
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const scope = req.accessScope;
+    const clientPrisma = req.clientPrisma!;
+
+    const sop = await clientPrisma.sopDocument.findUnique({ where: { id } });
+    if (!sop) throw new Error('SOP not found');
+    if (sop.status !== 'DRAFT' && sop.status !== 'IN_REVIEW') {
+      throw new Error('Can only edit SOPs in DRAFT or IN_REVIEW status');
+    }
+
+    const updated = await clientPrisma.sopDocument.update({
+      where: { id },
+      data: {
+        title: body.title ?? sop.title,
+        content: body.content ?? sop.content,
+        updatedAt: new Date(),
+      },
+    });
+
+    return {
+      sopDocumentId: updated.id,
+      status: updated.status,
+      sop: updated.content,
+      clientId: scope?.clientId,
+    };
+  }
+
+  @Post('sop-documents/:id/submit-review')
+  async submitForReview(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    const scope = req.accessScope;
+    const clientPrisma = req.clientPrisma!;
+
+    const sop = await clientPrisma.sopDocument.findUnique({ where: { id } });
+    if (!sop) throw new Error('SOP not found');
+    if (sop.status !== 'DRAFT') {
+      throw new Error('Can only submit SOPs that are in DRAFT status');
+    }
+
+    const updated = await clientPrisma.sopDocument.update({
+      where: { id },
+      data: { status: 'IN_REVIEW', updatedAt: new Date() },
+    });
+
+    return { sopDocumentId: updated.id, status: updated.status, clientId: scope?.clientId };
+  }
+
+  @Post('sop-documents/:id/approve')
+  async approveSop(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    const scope = req.accessScope;
+    const clientPrisma = req.clientPrisma!;
+
+    const perms = scope?.permissions || [];
+    const role = scope?.role || '';
+    if (!perms.includes('REVIEW_SOP') && !['REVIEWER', 'CLIENT_ADMIN'].includes(role)) {
+      throw new Error('Insufficient permissions to approve SOP');
+    }
+
+    const sop = await clientPrisma.sopDocument.findUnique({ where: { id } });
+    if (!sop) throw new Error('SOP not found');
+    if (sop.status !== 'IN_REVIEW') {
+      throw new Error('Can only approve SOPs that are IN_REVIEW');
+    }
+
+    const updated = await clientPrisma.sopDocument.update({
+      where: { id },
+      data: { status: 'APPROVED', updatedAt: new Date() },
+    });
+
+    return { sopDocumentId: updated.id, status: updated.status, clientId: scope?.clientId };
+  }
+
+  @Post('sop-documents/:id/reject')
+  async rejectSop(
+    @Param('id') id: string,
+    @Body() body: { reason?: string },
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const scope = req.accessScope;
+    const clientPrisma = req.clientPrisma!;
+
+    const perms = scope?.permissions || [];
+    const role = scope?.role || '';
+    if (!perms.includes('REVIEW_SOP') && !['REVIEWER', 'CLIENT_ADMIN'].includes(role)) {
+      throw new Error('Insufficient permissions to reject SOP');
+    }
+
+    const sop = await clientPrisma.sopDocument.findUnique({ where: { id } });
+    if (!sop) throw new Error('SOP not found');
+    if (sop.status !== 'IN_REVIEW' && sop.status !== 'DRAFT') {
+      throw new Error('Can only reject SOPs that are IN_REVIEW or DRAFT');
+    }
+
+    const currentContent = (sop.content as any) || {};
+    const updatedContent = body.reason ? { ...currentContent, rejectionReason: body.reason } : currentContent;
+
+    const updated = await clientPrisma.sopDocument.update({
+      where: { id },
+      data: { status: 'REJECTED', content: updatedContent, updatedAt: new Date() },
+    });
+
+    return {
+      sopDocumentId: updated.id,
+      status: updated.status,
+      rejectionReason: body.reason,
+      clientId: scope?.clientId,
+    };
+  }
 }
