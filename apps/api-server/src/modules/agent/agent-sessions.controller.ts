@@ -10,6 +10,8 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ClientResolverGuard } from '../client-resolver/client-resolver.guard';
 import type { AuthenticatedRequest } from '../client-resolver/client-resolver.guard';
+import { TimelineBuilder } from './timeline.builder';
+import { SopDraftGenerator } from './sop.generator';
 
 /**
  * Agent-facing endpoints (MVP).
@@ -21,6 +23,11 @@ import type { AuthenticatedRequest } from '../client-resolver/client-resolver.gu
 @Controller('agent')
 @UseGuards(JwtAuthGuard, ClientResolverGuard)
 export class AgentSessionsController {
+  constructor(
+    private readonly timelineBuilder: TimelineBuilder,
+    private readonly sopDraftGenerator: SopDraftGenerator,
+  ) {}
+
   @Get('config')
   getConfig(@Req() req: AuthenticatedRequest) {
     const scope = req.accessScope;
@@ -157,17 +164,15 @@ export class AgentSessionsController {
   async buildTimeline(@Param('id') sessionId: string, @Req() req: AuthenticatedRequest) {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
-    const { TimelineBuilder } = await import('./timeline.builder'); // lazy for lean module
-    const builder = new TimelineBuilder();
 
     const events = await clientPrisma.event.findMany({
       where: { sessionId },
       orderBy: { sequenceNo: 'asc' },
     });
 
-    const steps = builder.buildTimeline(events as any);
+    const steps = this.timelineBuilder.buildTimeline(events as any);
 
-    // Store or upsert workflow draft in client DB
+    // Store or upsert workflow draft in client DB (unique on sourceSessionId)
     const workflow = await clientPrisma.workflow.upsert({
       where: { sourceSessionId: sessionId },
       update: {
@@ -194,8 +199,6 @@ export class AgentSessionsController {
   async generateSopDraft(@Param('id') sessionId: string, @Req() req: AuthenticatedRequest) {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
-    const { SopDraftGenerator } = await import('./sop.generator');
-    const generator = new SopDraftGenerator();
 
     // Get or build the workflow for this session
     let workflow = await clientPrisma.workflow.findFirst({
@@ -208,9 +211,7 @@ export class AgentSessionsController {
         where: { sessionId },
         orderBy: { sequenceNo: 'asc' },
       });
-      const { TimelineBuilder } = await import('./timeline.builder');
-      const builder = new TimelineBuilder();
-      const steps = builder.buildTimeline(events as any);
+      const steps = this.timelineBuilder.buildTimeline(events as any);
 
       workflow = await clientPrisma.workflow.create({
         data: {
@@ -222,7 +223,7 @@ export class AgentSessionsController {
     }
 
     const steps = (workflow.steps as any[]) || [];
-    const sopContent = generator.generateSopDraft(workflow.title, steps);
+    const sopContent = this.sopDraftGenerator.generateSopDraft(workflow.title, steps);
 
     const sop = await clientPrisma.sopDocument.create({
       data: {
