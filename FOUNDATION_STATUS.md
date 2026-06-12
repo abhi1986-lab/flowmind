@@ -193,7 +193,54 @@ Confirmed by schema (only clients, client_routes, client_licenses, platform_admi
 
 All infrastructure, migration, seeding, short-circuit removal, resolver, and the 6 required endpoint behaviors validated against a real running control DB record for "acme". Client isolation and guard enforcement working as designed with live data.
 
-## Client Data Plane + Session/Event Backbone (feature/client-data-plane-session-events)
+## MVP SOP Generation Slice (lean focus on Session → Events → Timeline → SOP Draft)
+
+Per the important product correction: core MVP is **not** full task mining but a clear path to human-reviewable SOPs from captured sessions.
+
+Value chain implemented: **Session → Events (safe) → Timeline (grouped) → SOP Draft (template) → DRAFT (human review required)**.
+
+### Strict Scope Adhered To
+- Only Client Data Plane + Session/Event Backbone + minimal Timeline + template SOP.
+- No desktop capture, no LLM (deterministic template generator only), no auto-publish/approve, no complex analytics/automation discovery, no billing/SSO/etc.
+- Client isolation via resolver + client-specific Prisma (adapter) — all operational data (sessions, events, workflows, sop_documents) only in client DB.
+- Control plane untouched for operational data.
+
+### Implementation Highlights (small commits)
+- Extended client schema with Workflow (timeline output) and SopDocument (with status DRAFT/IN_REVIEW/APPROVED/REJECTED).
+- TimelineBuilder: deterministic grouping of events into ordered steps (app/window changes as major, actions grouped).
+- SopDraftGenerator: pure template filling — title, purpose, scope, prerequisites, procedure (from steps), decision points (heuristic), exceptions, checklist.
+- Endpoints added behind existing guards:
+  - POST /agent/sessions/:id/build-timeline (stores Workflow draft)
+  - POST /agent/sessions/:id/generate-sop-draft (stores SopDocument as DRAFT; auto-builds timeline if needed for lean flow)
+- Event batch explicitly rejects typedText/raw keystrokes (enforced at ingestion).
+- Session backbone (create/start/batch/stop) already wired from prior slice, now exercised end-to-end for SOP path.
+
+### Validation Executed (exact per query)
+1. Login (demo user) → JWT.
+2. Create session → real ID from client DB.
+3. Upload 4 safe sample events (APP_CHANGED, MOUSE_CLICK, KEY_ACTION nav, USER_NOTE — no forbidden fields) → accepted.
+4. Stop session.
+5. Build timeline → grouped steps, stored Workflow draft in client DB.
+6. Generate SOP draft → full template content, stored as DRAFT SopDocument linked to workflow.
+7. Queries:
+   - **Client DB (postgres-client-a)**: Session (STOPPED with timestamps), 4 Events, 1 Workflow (with steps JSON), 1 SopDocument (DRAFT + full sections: title/purpose/scope/procedure/decisionPoints/exceptions/checklist).
+   - **Control DB (postgres-control)**: Only client registry/routing (acme record). Queries for "sessions"/"events"/"sop_documents" fail with "relation does not exist" — proving **zero operational data** in control plane.
+
+All via real DB connections from resolver (no short-circuit).
+
+### Checks
+- Baseline (before code): typecheck/lint/build passed.
+- After full slice: typecheck/lint/build passed (re-ran).
+- Working tree managed with small logical commits on feature/client-data-plane-session-events.
+- Tag foundation-db-backed-v0 on baseline (pushed).
+
+This completes the minimum backend flow for "create an SOP from a workflow session" with human review gate. Ready for desktop integration in future constrained work.
+
+Next recommended (if continuing lean): desktop agent to feed real events into these endpoints, or simple SOP review/approve endpoints with status transitions. 
+
+**Current branch:** feature/client-data-plane-session-events
+**Tag:** foundation-db-backed-v0 (on baseline)
+**Status:** MVP SOP path validated end-to-end with proper isolation.
 
 Implemented the next foundation slice per development order and constraints.
 
