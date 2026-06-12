@@ -119,10 +119,20 @@ export class AgentSessionsController {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
     const sessionId = body.sessionId;
-    const events = body.events || [];
+    let events = body.events || [];
+
+    // Strict MVP rule: Reject any typedText or raw keystroke fields (keylogging prohibition)
+    const forbidden = events.some((e: any) => 
+      e.typedText !== undefined || 
+      e.rawKeystrokes !== undefined || 
+      (e.metadata && (e.metadata.typedText || e.metadata.keystrokes || e.metadata.raw))
+    );
+    if (forbidden) {
+      throw new Error('Forbidden: typedText or raw keystroke data is not allowed in event ingestion (keylogging prohibition).');
+    }
 
     if (sessionId && events.length > 0) {
-      // Basic batch insert for backbone (no heavy dedupe/validation in this slice)
+      // Basic batch insert for backbone
       await clientPrisma.event.createMany({
         data: events.map((e: any, idx: number) => ({
           sessionId,
@@ -140,6 +150,96 @@ export class AgentSessionsController {
       received: events.length,
       clientId: scope?.clientId,
       status: 'ACCEPTED',
+    };
+  }
+
+  @Post('sessions/:id/build-timeline')
+  async buildTimeline(@Param('id') sessionId: string, @Req() req: AuthenticatedRequest) {
+    const scope = req.accessScope;
+    const clientPrisma = req.clientPrisma!;
+    const { TimelineBuilder } = await import('./timeline.builder'); // lazy for lean module
+    const builder = new TimelineBuilder();
+
+    const events = await clientPrisma.event.findMany({
+      where: { sessionId },
+      orderBy: { sequenceNo: 'asc' },
+    });
+
+    const steps = builder.buildTimeline(events as any);
+
+    // Store or upsert workflow draft in client DB
+    const workflow = await clientPrisma.workflow.upsert({
+      where: { sourceSessionId: sessionId },
+      update: {
+        title: `Workflow from session ${sessionId}`,
+        steps: steps as any,
+      },
+      create: {
+        sourceSessionId: sessionId,
+        title: `Workflow from session ${sessionId}`,
+        steps: steps as any,
+      },
+    });
+
+    return {
+      workflowId: workflow.id,
+      sessionId,
+      stepCount: steps.length,
+      steps,
+      clientId: scope?.clientId,
+    };
+  }
+
+  @Post('sessions/:id/generate-sop-draft')
+  async generateSopDraft(@Param('id') sessionId: string, @Req() req: AuthenticatedRequest) {
+    const scope = req.accessScope;
+    const clientPrisma = req.clientPrisma!;
+    const { SopDraftGenerator } = await import('./sop.generator');
+    const generator = new SopDraftGenerator();
+
+    // Get or build the workflow for this session
+    let workflow = await clientPrisma.workflow.findFirst({
+      where: { sourceSessionId: sessionId },
+    });
+
+    if (!workflow) {
+      // Auto-build timeline if not present (for lean validation flow)
+      const events = await clientPrisma.event.findMany({
+        where: { sessionId },
+        orderBy: { sequenceNo: 'asc' },
+      });
+      const { TimelineBuilder } = await import('./timeline.builder');
+      const builder = new TimelineBuilder();
+      const steps = builder.buildTimeline(events as any);
+
+      workflow = await clientPrisma.workflow.create({
+        data: {
+          sourceSessionId: sessionId,
+          title: `Workflow from session ${sessionId}`,
+          steps: steps as any,
+        },
+      });
+    }
+
+    const steps = (workflow.steps as any[]) || [];
+    const sopContent = generator.generateSopDraft(workflow.title, steps);
+
+    const sop = await clientPrisma.sopDocument.create({
+      data: {
+        workflowId: workflow.id,
+        title: sopContent.title,
+        status: 'DRAFT',
+        content: sopContent as any,
+      },
+    });
+
+    return {
+      sopDocumentId: sop.id,
+      workflowId: workflow.id,
+      sessionId,
+      status: sop.status,
+      sop: sopContent,
+      clientId: scope?.clientId,
     };
   }
 }
