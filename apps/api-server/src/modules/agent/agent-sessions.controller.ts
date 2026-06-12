@@ -38,7 +38,10 @@ export class AgentSessionsController {
   }
 
   @Post('sessions')
-  async createSession(@Req() req: AuthenticatedRequest, @Body() _body: unknown) {
+  async createSession(
+    @Req() req: AuthenticatedRequest,
+    @Body() _body: unknown,
+  ) {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
     const actorUserId = scope?.actorUserId || req.user?.sub || 'demo-user';
@@ -70,7 +73,10 @@ export class AgentSessionsController {
   }
 
   @Post('sessions/:id/start')
-  async startSession(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+  async startSession(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
 

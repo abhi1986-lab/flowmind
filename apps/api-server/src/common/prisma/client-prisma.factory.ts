@@ -19,7 +19,10 @@ export class ClientPrismaFactory {
       const adapter = new PrismaPg(pool);
       const client = new PrismaClient({
         adapter,
-        log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+        log:
+          process.env.NODE_ENV === 'development'
+            ? ['error', 'warn']
+            : ['error'],
       });
       this.cache.set(dbUrl, client);
     }

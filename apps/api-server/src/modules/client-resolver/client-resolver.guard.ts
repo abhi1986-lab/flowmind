@@ -75,7 +75,9 @@ export class ClientResolverGuard implements CanActivate {
     });
 
     // Attach client data plane PrismaClient (key for Client Data Plane isolation + Session/Event backbone)
-    req.clientPrisma = this.clientPrismaFactory.getPrismaClient(resolved.route.dbConnectionRef);
+    req.clientPrisma = this.clientPrismaFactory.getPrismaClient(
+      resolved.route.dbConnectionRef,
+    );
     req.accessScope = scope;
 
     return true;
