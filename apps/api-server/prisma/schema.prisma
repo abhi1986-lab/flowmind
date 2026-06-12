@@ -168,3 +168,32 @@ model Artifact {
   @@map("artifacts")
 }
 
+// Workflow draft from session events (Timeline Builder output)
+model Workflow {
+  id               String   @id @default(uuid())
+  sourceSessionId  String   @map("source_session_id")
+  title            String
+  summary          String?
+  steps            Json     // [{ stepNo: number, title: string, description: string, eventRefs?: string[] }]
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  sopDocuments SopDocument[]
+
+  @@map("workflows")
+}
+
+// SOP draft (template-based generator output)
+model SopDocument {
+  id          String   @id @default(uuid())
+  workflowId  String   @map("workflow_id")
+  title       String
+  status      String   @default("DRAFT") // DRAFT, IN_REVIEW, APPROVED, REJECTED
+  content     Json     // { title, purpose, scope, prerequisites, procedure: [...], decisionPoints: [...], exceptions: [...], checklist: [...] }
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workflow Workflow @relation(fields: [workflowId], references: [id])
+
+  @@map("sop_documents")
+}
+
