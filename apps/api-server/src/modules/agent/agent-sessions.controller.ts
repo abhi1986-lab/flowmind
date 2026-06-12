@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -259,7 +260,10 @@ export class AgentSessionsController {
 
   // A. SOP read APIs (lean)
   @Get('sessions/:id/timeline')
-  async getTimeline(@Param('id') sessionId: string, @Req() req: AuthenticatedRequest) {
+  async getTimeline(
+    @Param('id') sessionId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
 
@@ -281,7 +285,10 @@ export class AgentSessionsController {
   }
 
   @Get('sessions/:id/sop')
-  async getSop(@Param('id') sessionId: string, @Req() req: AuthenticatedRequest) {
+  async getSop(
+    @Param('id') sessionId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
 
@@ -345,7 +352,10 @@ export class AgentSessionsController {
   }
 
   @Post('sop-documents/:id/submit-review')
-  async submitForReview(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+  async submitForReview(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
 
@@ -360,7 +370,11 @@ export class AgentSessionsController {
       data: { status: 'IN_REVIEW', updatedAt: new Date() },
     });
 
-    return { sopDocumentId: updated.id, status: updated.status, clientId: scope?.clientId };
+    return {
+      sopDocumentId: updated.id,
+      status: updated.status,
+      clientId: scope?.clientId,
+    };
   }
 
   @Post('sop-documents/:id/approve')
@@ -370,7 +384,10 @@ export class AgentSessionsController {
 
     const perms = scope?.permissions || [];
     const role = scope?.role || '';
-    if (!perms.includes('REVIEW_SOP') && !['REVIEWER', 'CLIENT_ADMIN'].includes(role)) {
+    if (
+      !perms.includes('REVIEW_SOP') &&
+      !['REVIEWER', 'CLIENT_ADMIN'].includes(role)
+    ) {
       throw new Error('Insufficient permissions to approve SOP');
     }
 
@@ -385,7 +402,11 @@ export class AgentSessionsController {
       data: { status: 'APPROVED', updatedAt: new Date() },
     });
 
-    return { sopDocumentId: updated.id, status: updated.status, clientId: scope?.clientId };
+    return {
+      sopDocumentId: updated.id,
+      status: updated.status,
+      clientId: scope?.clientId,
+    };
   }
 
   @Post('sop-documents/:id/reject')
@@ -399,7 +420,10 @@ export class AgentSessionsController {
 
     const perms = scope?.permissions || [];
     const role = scope?.role || '';
-    if (!perms.includes('REVIEW_SOP') && !['REVIEWER', 'CLIENT_ADMIN'].includes(role)) {
+    if (
+      !perms.includes('REVIEW_SOP') &&
+      !['REVIEWER', 'CLIENT_ADMIN'].includes(role)
+    ) {
       throw new Error('Insufficient permissions to reject SOP');
     }
 
@@ -410,11 +434,17 @@ export class AgentSessionsController {
     }
 
     const currentContent = (sop.content as any) || {};
-    const updatedContent = body.reason ? { ...currentContent, rejectionReason: body.reason } : currentContent;
+    const updatedContent = body.reason
+      ? { ...currentContent, rejectionReason: body.reason }
+      : currentContent;
 
     const updated = await clientPrisma.sopDocument.update({
       where: { id },
-      data: { status: 'REJECTED', content: updatedContent, updatedAt: new Date() },
+      data: {
+        status: 'REJECTED',
+        content: updatedContent,
+        updatedAt: new Date(),
+      },
     });
 
     return {
