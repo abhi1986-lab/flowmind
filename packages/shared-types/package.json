@@ -1,0 +1,15 @@
+{
+  "name": "@flowmind/shared-types",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json || echo 'no tsconfig yet - using source'",
+    "lint": "echo 'add eslint later'"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}

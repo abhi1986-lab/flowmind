@@ -1,0 +1,19 @@
+{
+  "name": "flowmind-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "tsc -w & electron .",
+    "build": "tsc",
+    "package": "echo 'Use electron-builder in later sprint'"
+  },
+  "dependencies": {
+    "electron": "^31.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0"
+  }
+}

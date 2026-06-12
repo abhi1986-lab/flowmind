@@ -1,0 +1,191 @@
+# FlowMind AI MVP Infrastructure
+# (version key removed - obsolete in modern Docker Compose)
+# - Shared control plane DB (client registry, routes, platform admins)
+# - Per-client operational DBs (example: client-a). Add more as needed for testing.
+# - Redis for BullMQ
+# - MinIO (S3-compatible) with per-client buckets
+# - API server, Worker, Web dashboard
+#
+# IMPORTANT: This is for local/dev only. Follows client-isolated data plane rules.
+# Client data (events, screenshots, SOPs) lives ONLY in the client-specific services.
+# Control plane contains routing metadata ONLY.
+
+services:
+  # --- Control Plane ---
+  postgres-control:
+    image: postgres:16-alpine
+    container_name: fm-postgres-control
+    environment:
+      POSTGRES_USER: flowmind
+      POSTGRES_PASSWORD: flowmind_dev
+      POSTGRES_DB: flowmind_control
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres-control:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowmind -d flowmind_control"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- Example Client Data Plane (client_a / "acme" for local testing) ---
+  # In real usage, each client gets its own DB container or managed instance + separate schema provisioning.
+  # For MVP local: dedicated container per client is simple and enforces isolation.
+  postgres-client-a:
+    image: postgres:16-alpine
+    container_name: fm-postgres-client-a
+    environment:
+      POSTGRES_USER: client_a
+      POSTGRES_PASSWORD: client_a_dev
+      POSTGRES_DB: client_a_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./data/postgres-client-a:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U client_a -d client_a_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Add more clients for multi-tenant local testing as:
+  # postgres-client-b: ... port 5434, db client_b_db
+
+  redis:
+    image: redis:7-alpine
+    container_name: fm-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # S3-compatible object storage (per-client buckets/namespaces)
+  minio:
+    image: minio/minio:latest
+    container_name: fm-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Console
+    volumes:
+      - ./data/minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # MinIO bucket initializer (creates client-specific buckets on first up)
+  minio-init:
+    image: minio/mc:latest
+    container_name: fm-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 minioadmin minioadmin;
+        mc mb local/client-a-artifacts --ignore-existing;
+        mc mb local/client-a-uploads --ignore-existing;
+        mc policy set download local/client-a-artifacts || true;
+        echo 'MinIO client buckets initialized for client-a';
+        # Add more: mc mb local/client-b-artifacts --ignore-existing;
+      "
+    restart: "no"
+
+  # --- Application Layer (shared) ---
+  api-server:
+    build:
+      context: ../apps/api-server
+      dockerfile: Dockerfile
+    container_name: fm-api
+    depends_on:
+      postgres-control:
+        condition: service_healthy
+      postgres-client-a:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      # Control DB
+      CONTROL_DATABASE_URL: postgresql://flowmind:flowmind_dev@postgres-control:5432/flowmind_control
+      # Client resolver will construct per-client URLs dynamically from routes table
+      # Example for initial client_a route (seeded):
+      # For dev flexibility, also allow X-Client-Id header + direct client urls if needed.
+      REDIS_URL: redis://redis:6379
+      # MinIO (S3) - client specific buckets selected by resolver
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_FORCE_PATH_STYLE: "true"
+      # JWT
+      JWT_SECRET: dev-super-secret-change-in-real-env
+      JWT_EXPIRES_IN: 7d
+      # For local dev only: allow header-based client override when host is not subdomain
+      ALLOW_DEV_CLIENT_HEADER: "true"
+    ports:
+      - "4000:4000"
+    volumes:
+      - ../apps/api-server:/app
+      - /app/node_modules
+    command: npm run start:dev
+
+  worker:
+    build:
+      context: ../apps/worker
+      dockerfile: Dockerfile
+    container_name: fm-worker
+    depends_on:
+      - api-server
+      - redis
+    environment:
+      NODE_ENV: development
+      REDIS_URL: redis://redis:6379
+      # Worker also needs control + ability to reach client DBs (via same resolver pattern or direct for jobs)
+      CONTROL_DATABASE_URL: postgresql://flowmind:flowmind_dev@postgres-control:5432/flowmind_control
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_FORCE_PATH_STYLE: "true"
+      JWT_SECRET: dev-super-secret-change-in-real-env
+    volumes:
+      - ../apps/worker:/app
+      - /app/node_modules
+    command: npm run start:dev
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+    container_name: fm-web
+    depends_on:
+      - api-server
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      # For client context in browser calls (dev uses header or cookie)
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../apps/web:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
+
+# Note: Desktop agent runs on host (Electron), talks to localhost:4000 + MinIO.
+# For real subdomain testing: use dnsmasq / /etc/hosts + reverse proxy later.
+volumes:
+  # Named volumes not used; we bind to ./data for easy inspection/reset
+  {}

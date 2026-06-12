@@ -1,0 +1,90 @@
+// FlowMind AI - Control Plane Prisma Schema (MVP)
+// ONLY routing, licensing, platform admin, and metadata.
+// NO client operational data (sessions, events, SOPs, artifacts) here.
+// Per the Hybrid Shared-Application, Client-Isolated Data Architecture.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // URL supplied via prisma.config.ts (new Prisma 7+ requirement) + process.env.DATABASE_URL
+  // See prisma.config.ts and CONTROL_DATABASE_URL mapped in docker-compose.
+}
+
+// Client organization / tenant
+model Client {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique // used for subdomain e.g. "acme" -> acme.flowmind.ai
+  status      String   @default("active") // active, suspended, deleted
+  plan        String   @default("mvp")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  routes      ClientRoute[]
+  licenses    ClientLicense[]
+
+  @@map("clients")
+}
+
+// Infrastructure routing for a client (the key isolation pointer)
+model ClientRoute {
+  id                String   @id @default(uuid())
+  clientId          String   @map("client_id")
+  dbConnectionRef   String   @map("db_connection_ref") // e.g. "postgresql://.../client_a_db" or secret ref
+  s3BucketRef       String   @map("s3_bucket_ref")     // e.g. "client-a-artifacts"
+  vectorNamespace   String   @map("vector_namespace")  // for pgvector, e.g. "client_a"
+  aiConfigRef       String   @map("ai_config_ref")     // JSON or ref to provider + key/endpoint
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@unique([clientId])
+  @@map("client_routes")
+}
+
+model ClientLicense {
+  id          String    @id @default(uuid())
+  clientId    String    @map("client_id")
+  status      String    @default("active")
+  maxUsers    Int       @default(50) @map("max_users")
+  maxWorkstations Int   @default(20) @map("max_workstations")
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@map("client_licenses")
+}
+
+// Internal FlowMind platform admins (control plane only)
+model PlatformAdmin {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  role      String   @default("platform_admin") // platform_admin, platform_viewer
+  status    String   @default("active")
+  passwordHash String @map("password_hash")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("platform_admins")
+}
+
+// Append-only audit for control plane actions
+model PlatformAuditLog {
+  id          String   @id @default(uuid())
+  actorId     String?  @map("actor_id") // platform admin or system
+  action      String
+  targetType  String   @map("target_type")
+  targetId    String?  @map("target_id")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("platform_audit_logs")
+}
+

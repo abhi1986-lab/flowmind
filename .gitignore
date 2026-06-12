@@ -1,0 +1,65 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Builds
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Electron
+release/
+*.exe
+*.dmg
+*.AppImage
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.sublime-project
+*.sublime-workspace
+
+# Prisma
+apps/api-server/prisma/migrations/**/migration.sql.bak
+apps/api-server/prisma/client-*/
+generated/
+
+# Docker volumes / local data
+infra/data/
+infra/minio-data/
+*.db
+
+# Test
+coverage/
+*.lcov
+.nyc_output/
+
+# Misc
+*.p12
+*.key
+*.crt
+.cache/
+tmp/
+tmp-*/

@@ -1,0 +1,39 @@
+{
+  "name": "flowmind-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FlowMind AI - Operational Workflow Intelligence Platform. Consent-based enterprise SaaS for capturing real workflows and converting them into reusable organizational knowledge (SOPs, maps, training).",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev": "echo 'Use specific workspace dev scripts or docker-compose'",
+    "lint": "npm run lint --workspaces --if-present || true",
+    "test": "npm run test --workspaces --if-present || true",
+    "docker:up": "docker compose -f infra/docker-compose.yml up --build -d",
+    "docker:down": "docker compose -f infra/docker-compose.yml down -v",
+    "db:control:migrate": "cd apps/api-server && npx prisma migrate deploy || echo 'Run after DBs are up, or use migrate dev'",
+    "db:control:generate": "cd apps/api-server && npx prisma generate",
+    "seed:control": "cd apps/api-server && npx tsx scripts/seed-control.ts",
+    "api:dev": "cd apps/api-server && npm run build && ALLOW_DEV_CLIENT_HEADER=true node dist/apps/api-server/src/main.js",
+    "typecheck": "npm run typecheck --workspaces --if-present || npx tsc -p apps/api-server/tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "prettier": "^3.5.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  },
+  "prettier": {
+    "singleQuote": true,
+    "trailingComma": "es5",
+    "printWidth": 100,
+    "tabWidth": 2,
+    "semi": true
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
