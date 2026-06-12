@@ -23,7 +23,8 @@ export class TimelineBuilder {
 
     // Ensure sorted by sequence or timestamp
     const sorted = [...events].sort((a, b) => {
-      if (a.sequenceNo != null && b.sequenceNo != null) return a.sequenceNo - b.sequenceNo;
+      if (a.sequenceNo != null && b.sequenceNo != null)
+        return a.sequenceNo - b.sequenceNo;
       return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
     });
 
@@ -36,7 +37,12 @@ export class TimelineBuilder {
       const app = ev.appName || 'Unknown App';
       const win = ev.windowTitle || 'Unknown Window';
 
-      if (ev.eventType === 'APP_CHANGED' || ev.eventType === 'WINDOW_CHANGED' || app !== lastApp || win !== lastWindow) {
+      if (
+        ev.eventType === 'APP_CHANGED' ||
+        ev.eventType === 'WINDOW_CHANGED' ||
+        app !== lastApp ||
+        win !== lastWindow
+      ) {
         steps.push({
           stepNo: currentStepNo++,
           title: `${app} - ${win}`,
@@ -49,9 +55,12 @@ export class TimelineBuilder {
         // Group action inside current context
         let desc = '';
         if (ev.eventType === 'MOUSE_CLICK') desc = 'Performed mouse click';
-        else if (ev.eventType === 'KEY_ACTION') desc = `Key action: ${ev.metadata?.action || 'navigation'}`;
-        else if (ev.eventType === 'USER_NOTE') desc = `Note: ${ev.metadata?.note || ev.metadata || ''}`;
-        else if (ev.eventType === 'SCREEN_DELTA') desc = 'Significant screen change detected';
+        else if (ev.eventType === 'KEY_ACTION')
+          desc = `Key action: ${(ev.metadata as any)?.action || 'navigation'}`;
+        else if (ev.eventType === 'USER_NOTE')
+          desc = `Note: ${(ev.metadata as any)?.note || ev.metadata || ''}`;
+        else if (ev.eventType === 'SCREEN_DELTA')
+          desc = 'Significant screen change detected';
         else desc = ev.eventType;
 
         if (steps.length > 0) {

@@ -25,19 +25,25 @@ export class SopDraftGenerator {
    * Output is structured for human review (status DRAFT).
    */
   generateSopDraft(workflowTitle: string, steps: WorkflowStep[]): SopContent {
-    const procedure = steps.map(step => 
-      `${step.stepNo}. ${step.title}: ${step.description}`
+    const procedure = steps.map(
+      (step) => `${step.stepNo}. ${step.title}: ${step.description}`,
     );
 
     // Simple heuristic for decision points from step titles/descriptions
     const decisionPoints = steps
-      .filter(s => 
-        /decide|if|check|verify|confirm|choose|select|branch|error|exception/i.test(s.title + ' ' + s.description)
+      .filter((s) =>
+        /decide|if|check|verify|confirm|choose|select|branch|error|exception/i.test(
+          s.title + ' ' + s.description,
+        ),
       )
-      .map(s => `${s.stepNo}. ${s.title} - look for decision or branch point`);
+      .map(
+        (s) => `${s.stepNo}. ${s.title} - look for decision or branch point`,
+      );
 
     if (decisionPoints.length === 0) {
-      decisionPoints.push('Review steps for any conditional logic or user decisions during execution.');
+      decisionPoints.push(
+        'Review steps for any conditional logic or user decisions during execution.',
+      );
     }
 
     return {
@@ -47,22 +53,22 @@ export class SopDraftGenerator {
       prerequisites: [
         'Access to required applications and systems as used in the captured workflow.',
         'Necessary user permissions and credentials.',
-        'Any supporting documents or data referenced in the steps.'
+        'Any supporting documents or data referenced in the steps.',
       ],
       procedure,
       decisionPoints,
       exceptions: [
         'If an application or window title changes unexpectedly, log the variation and follow the nearest matching step.',
         'For errors or unexpected screens, pause and escalate per team exception handling process.',
-        'User notes captured during the session may indicate ad-hoc workarounds or exceptions.'
+        'User notes captured during the session may indicate ad-hoc workarounds or exceptions.',
       ],
       checklist: [
         'Verify all prerequisites are met before starting.',
         'Complete each step in order; do not skip unless documented decision point allows.',
         'Record any deviations in the process log or notes.',
         'At end of procedure, confirm all outputs (files, updates, notifications) were produced as expected.',
-        'If this is training use, have reviewer observe and sign off.'
-      ]
+        'If this is training use, have reviewer observe and sign off.',
+      ],
     };
   }
 }

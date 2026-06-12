@@ -126,16 +126,20 @@ export class AgentSessionsController {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
     const sessionId = body.sessionId;
-    let events = body.events || [];
+    const events = body.events || [];
 
     // Strict MVP rule: Reject any typedText or raw keystroke fields (keylogging prohibition)
-    const forbidden = events.some((e: any) => 
-      e.typedText !== undefined || 
-      e.rawKeystrokes !== undefined || 
-      (e.metadata && (e.metadata.typedText || e.metadata.keystrokes || e.metadata.raw))
+    const forbidden = events.some(
+      (e: any) =>
+        e.typedText !== undefined ||
+        e.rawKeystrokes !== undefined ||
+        (e.metadata &&
+          (e.metadata.typedText || e.metadata.keystrokes || e.metadata.raw)),
     );
     if (forbidden) {
-      throw new Error('Forbidden: typedText or raw keystroke data is not allowed in event ingestion (keylogging prohibition).');
+      throw new Error(
+        'Forbidden: typedText or raw keystroke data is not allowed in event ingestion (keylogging prohibition).',
+      );
     }
 
     if (sessionId && events.length > 0) {
@@ -161,7 +165,10 @@ export class AgentSessionsController {
   }
 
   @Post('sessions/:id/build-timeline')
-  async buildTimeline(@Param('id') sessionId: string, @Req() req: AuthenticatedRequest) {
+  async buildTimeline(
+    @Param('id') sessionId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
 
@@ -170,7 +177,7 @@ export class AgentSessionsController {
       orderBy: { sequenceNo: 'asc' },
     });
 
-    const steps = this.timelineBuilder.buildTimeline(events as any);
+    const steps = this.timelineBuilder.buildTimeline(events);
 
     // Store or upsert workflow draft in client DB (unique on sourceSessionId)
     const workflow = await clientPrisma.workflow.upsert({
@@ -196,7 +203,10 @@ export class AgentSessionsController {
   }
 
   @Post('sessions/:id/generate-sop-draft')
-  async generateSopDraft(@Param('id') sessionId: string, @Req() req: AuthenticatedRequest) {
+  async generateSopDraft(
+    @Param('id') sessionId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
 
@@ -211,7 +221,7 @@ export class AgentSessionsController {
         where: { sessionId },
         orderBy: { sequenceNo: 'asc' },
       });
-      const steps = this.timelineBuilder.buildTimeline(events as any);
+      const steps = this.timelineBuilder.buildTimeline(events);
 
       workflow = await clientPrisma.workflow.create({
         data: {
@@ -223,7 +233,10 @@ export class AgentSessionsController {
     }
 
     const steps = (workflow.steps as any[]) || [];
-    const sopContent = this.sopDraftGenerator.generateSopDraft(workflow.title, steps);
+    const sopContent = this.sopDraftGenerator.generateSopDraft(
+      workflow.title,
+      steps,
+    );
 
     const sop = await clientPrisma.sopDocument.create({
       data: {
