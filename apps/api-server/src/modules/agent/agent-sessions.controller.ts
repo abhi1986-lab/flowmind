@@ -38,48 +38,102 @@ export class AgentSessionsController {
   }
 
   @Post('sessions')
-  createSession(@Req() req: AuthenticatedRequest, @Body() _body: unknown) {
+  async createSession(@Req() req: AuthenticatedRequest, @Body() _body: unknown) {
     const scope = req.accessScope;
-    const sessionId = 'sess_' + Date.now();
-    void _body; // mark param as used for lint (stub handler)
+    const clientPrisma = req.clientPrisma!;
+    const actorUserId = scope?.actorUserId || req.user?.sub || 'demo-user';
 
-    // TODO (next): persist to client-scoped DB using scope.clientDbUrl or injected client prisma
+    // Ensure demo user exists in this client DB (backbone slice; full users later)
+    await clientPrisma.user.upsert({
+      where: { id: actorUserId },
+      update: {},
+      create: {
+        id: actorUserId,
+        email: req.user?.email || `${actorUserId}@local.test`,
+        role: scope?.role || 'CONTRIBUTOR',
+      },
+    });
+
+    const session = await clientPrisma.session.create({
+      data: {
+        userId: actorUserId,
+        status: 'CREATED',
+      },
+    });
+
+    void _body;
     return {
-      sessionId,
-      status: 'CREATED',
+      sessionId: session.id,
+      status: session.status,
       clientId: scope?.clientId,
-      note: 'Session created (stub). Full lifecycle + client DB persistence in Phase 3.',
     };
   }
 
   @Post('sessions/:id/start')
-  startSession(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+  async startSession(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     const scope = req.accessScope;
+    const clientPrisma = req.clientPrisma!;
+
+    await clientPrisma.session.update({
+      where: { id },
+      data: {
+        status: 'RECORDING',
+        startedAt: new Date(),
+      },
+    });
+
     return { sessionId: id, status: 'RECORDING', scopeClient: scope?.clientId };
   }
 
   @Post('sessions/:id/stop')
-  stopSession(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+  async stopSession(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     const scope = req.accessScope;
+    const clientPrisma = req.clientPrisma!;
+
+    await clientPrisma.session.update({
+      where: { id },
+      data: {
+        status: 'STOPPED',
+        endedAt: new Date(),
+      },
+    });
+
     return {
       sessionId: id,
       status: 'STOPPED',
       scopeClient: scope?.clientId,
-      note: 'Ready for processing / timeline build (future worker job).',
     };
   }
 
   @Post('events/batch')
-  uploadEvents(
+  async uploadEvents(
     @Req() req: AuthenticatedRequest,
-    @Body() body: { events?: unknown[] },
+    @Body() body: { sessionId?: string; events?: any[] },
   ) {
     const scope = req.accessScope;
-    // In real: validate, dedupe using sequence, store in client DB scoped to session
+    const clientPrisma = req.clientPrisma!;
+    const sessionId = body.sessionId;
+    const events = body.events || [];
+
+    if (sessionId && events.length > 0) {
+      // Basic batch insert for backbone (no heavy dedupe/validation in this slice)
+      await clientPrisma.event.createMany({
+        data: events.map((e: any, idx: number) => ({
+          sessionId,
+          sequenceNo: e.sequenceNo ?? idx + 1,
+          eventType: e.eventType,
+          timestamp: e.timestamp ? new Date(e.timestamp) : new Date(),
+          appName: e.appName,
+          windowTitle: e.windowTitle,
+          metadata: e.metadata || {},
+        })),
+      });
+    }
+
     return {
-      received: body?.events?.length ?? 0,
+      received: events.length,
       clientId: scope?.clientId,
-      status: 'ACCEPTED (stub)',
+      status: 'ACCEPTED',
     };
   }
 }
