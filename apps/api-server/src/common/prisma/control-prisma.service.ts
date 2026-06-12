@@ -22,7 +22,11 @@ export class ControlPrismaService
     const pool = new Pool({ connectionString: url });
     const adapter = new PrismaPg(pool);
 
-    super({ adapter, log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'] });
+    super({
+      adapter,
+      log:
+        process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+    });
   }
 
   async onModuleInit() {

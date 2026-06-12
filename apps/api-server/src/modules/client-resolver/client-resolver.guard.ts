@@ -7,12 +7,15 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
+import { PrismaClient } from '@prisma/client';
 import { ClientResolverService } from './client-resolver.service';
+import { ClientPrismaFactory } from '../../common/prisma/client-prisma.factory';
 import type { JwtPayload, AccessScope } from '@flowmind/shared-types';
 
 export interface AuthenticatedRequest extends Request {
   user?: JwtPayload;
   accessScope?: AccessScope;
+  clientPrisma?: PrismaClient; // per-client data plane (sessions, events, etc.)
 }
 
 /**
@@ -34,6 +37,7 @@ export class ClientResolverGuard implements CanActivate {
   constructor(
     private readonly clientResolver: ClientResolverService,
     private readonly reflector: Reflector,
+    private readonly clientPrismaFactory: ClientPrismaFactory,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -70,6 +74,10 @@ export class ClientResolverGuard implements CanActivate {
       route: resolved.route,
     });
 
+    // Attach client data plane PrismaClient (key for Client Data Plane isolation + Session/Event backbone)
+    req.clientPrisma = this.clientPrismaFactory.getPrismaClient(
+      resolved.route.dbConnectionRef,
+    );
     req.accessScope = scope;
 
     return true;

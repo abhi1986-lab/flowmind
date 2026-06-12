@@ -192,3 +192,208 @@ Confirmed by schema (only clients, client_routes, client_licenses, platform_admi
 **DB-backed foundation passed.**
 
 All infrastructure, migration, seeding, short-circuit removal, resolver, and the 6 required endpoint behaviors validated against a real running control DB record for "acme". Client isolation and guard enforcement working as designed with live data.
+
+## MVP SOP Generation Slice (lean focus on Session → Events → Timeline → SOP Draft)
+
+Per the important product correction: core MVP is **not** full task mining but a clear path to human-reviewable SOPs from captured sessions.
+
+Value chain implemented: **Session → Events (safe) → Timeline (grouped) → SOP Draft (template) → DRAFT (human review required)**.
+
+### Strict Scope Adhered To
+- Only Client Data Plane + Session/Event Backbone + minimal Timeline + template SOP.
+- No desktop capture, no LLM (deterministic template generator only), no auto-publish/approve, no complex analytics/automation discovery, no billing/SSO/etc.
+- Client isolation via resolver + client-specific Prisma (adapter) — all operational data (sessions, events, workflows, sop_documents) only in client DB.
+- Control plane untouched for operational data.
+
+### Implementation Highlights (small commits)
+- Extended client schema with Workflow (timeline output) and SopDocument (with status DRAFT/IN_REVIEW/APPROVED/REJECTED).
+- TimelineBuilder: deterministic grouping of events into ordered steps (app/window changes as major, actions grouped).
+- SopDraftGenerator: pure template filling — title, purpose, scope, prerequisites, procedure (from steps), decision points (heuristic), exceptions, checklist.
+- Endpoints added behind existing guards:
+  - POST /agent/sessions/:id/build-timeline (stores Workflow draft)
+  - POST /agent/sessions/:id/generate-sop-draft (stores SopDocument as DRAFT; auto-builds timeline if needed for lean flow)
+- Event batch explicitly rejects typedText/raw keystrokes (enforced at ingestion).
+- Session backbone (create/start/batch/stop) already wired from prior slice, now exercised end-to-end for SOP path.
+
+### Validation Executed (exact per query)
+1. Login (demo user) → JWT.
+2. Create session → real ID from client DB.
+3. Upload 4 safe sample events (APP_CHANGED, MOUSE_CLICK, KEY_ACTION nav, USER_NOTE — no forbidden fields) → accepted.
+4. Stop session.
+5. Build timeline → grouped steps, stored Workflow draft in client DB.
+6. Generate SOP draft → full template content, stored as DRAFT SopDocument linked to workflow.
+7. Queries:
+   - **Client DB (postgres-client-a)**: Session (STOPPED with timestamps), 4 Events, 1 Workflow (with steps JSON), 1 SopDocument (DRAFT + full sections: title/purpose/scope/procedure/decisionPoints/exceptions/checklist).
+   - **Control DB (postgres-control)**: Only client registry/routing (acme record). Queries for "sessions"/"events"/"sop_documents" fail with "relation does not exist" — proving **zero operational data** in control plane.
+
+All via real DB connections from resolver (no short-circuit).
+
+### Checks
+- Baseline (before code): typecheck/lint/build passed.
+- After full slice: typecheck/lint/build passed (re-ran).
+- Working tree managed with small logical commits on feature/client-data-plane-session-events.
+- Tag foundation-db-backed-v0 on baseline (pushed).
+
+This completes the minimum backend flow for "create an SOP from a workflow session" with human review gate. Ready for desktop integration in future constrained work.
+
+Next recommended (if continuing lean): desktop agent to feed real events into these endpoints, or simple SOP review/approve endpoints with status transitions. 
+
+**Current branch:** feature/client-data-plane-session-events
+**Tag:** foundation-db-backed-v0 (on baseline)
+**Status:** MVP SOP path validated end-to-end with proper isolation.
+
+Implemented the next foundation slice per development order and constraints.
+
+### Branch & Process
+- Created from clean baseline (after tagging foundation-db-backed-v0 on main).
+- Switched to feature/client-data-plane-session-events.
+- First actions (per rules): pulled/verified latest from origin, ran `npm run typecheck`, `npm run lint`, `npm run build` — all passed cleanly. Foundation confirmed intact before any new code.
+- Small logical commits only.
+- Strict scope followed: only Client Data Plane + Session/Event Backbone. No desktop, AI, SOP, dashboard.
+
+### Small Logical Commits
+1. feat(client-data-plane): add session, event, artifact, user, capture_policy models to Prisma schema
+2. feat(client-data-plane): add ClientPrismaFactory for per-client DB connections using adapter
+3. feat(client-data-plane): wire ClientPrismaFactory into ClientResolverGuard (attaches req.clientPrisma after isolation check)
+4. feat(session-event-backbone): implement real persistence in agent endpoints using client DB (create/update sessions + events via the factory-provided prisma)
+
+### Key Implementation
+- Client models added to the single schema (used exclusively when PrismaClient is instantiated against a client DB url from client_routes; control DB unaffected).
+- ClientPrismaFactory (in global PrismaModule): creates/caches PrismaClient + @prisma/adapter-pg + Pool for the exact dbConnectionRef of the resolved client. This + the guard is the runtime enforcement of "Client Data Plane" isolation.
+- Guard enhancement: after the hard client_id match check, attaches the correct clientPrisma to the typed AuthenticatedRequest (in addition to accessScope).
+- Real (non-stub) logic in AgentSessionsController (still fully protected by JwtAuthGuard + ClientResolverGuard):
+  - POST /agent/sessions → user upsert (demo) + session.create in the client's DB; returns real DB id.
+  - POST /agent/sessions/:id/start → session.update status + startedAt in client DB.
+  - POST /agent/sessions/:id/stop → session.update status + endedAt in client DB.
+  - POST /agent/events/batch → createMany events linked to the sessionId in client DB.
+- /agent/config left as stub (policy can be next within this slice if desired).
+
+## SOP Review + Minimal SOP Viewer (current slice - lean human review loop)
+
+Completed the minimum for SOP review and a basic viewer workbench.
+
+### A. What was built
+- **SOP read APIs** (added to agent controller):
+  - GET /agent/sessions/:id/timeline — returns the stored workflow/timeline draft (steps, title) from client DB.
+  - GET /agent/sessions/:id/sop — returns the linked SopDocument (status + full content) from client DB.
+- **SOP review APIs** (on /agent/sop-documents/:id ):
+  - PATCH — edit title and/or content JSON (allowed only while DRAFT or IN_REVIEW).
+  - POST /submit-review — transitions DRAFT → IN_REVIEW.
+  - POST /approve — transitions IN_REVIEW → APPROVED (gated by REVIEW_SOP permission or REVIEWER/CLIENT_ADMIN role from JWT/scope).
+  - POST /reject — transitions to REJECTED (accepts optional `reason` in body; same permission gate; reason merged into content).
+- **Minimal web viewer** (dev/demo only, explicitly not polished):
+  - New route/page: /sop-viewer (apps/web/app/sop-viewer/page.tsx).
+  - Login buttons for the 3 demo users (contributor/reviewer/admin) + token display/input.
+  - Session ID input + "Fetch Timeline & SOP" (calls the new GETs with Bearer + X-Client-Id: acme).
+  - Displays timeline as numbered steps list + raw.
+  - Displays SOP with status, title, and sections.
+  - Editable textarea (full content JSON) + Save button (does PATCH).
+  - Action buttons: Submit for Review, Approve, Reject (text input for reject reason).
+  - All actions refetch after success. Pure functional React, no extra deps or styling beyond basic.
+- Basic permissions: View for any same-client authenticated user (via existing guards). Approve/reject explicitly check REVIEW_SOP or appropriate role in the controller (using accessScope from guard).
+- All data operations go through clientPrisma (from resolver/guard) → client DB only.
+- No changes to control plane, no new operational tables there.
+- Used existing Workflow/SopDocument models + status field.
+- 4 small logical commits on the feature branch (controller extensions, web page, MD update).
+
+### B. What was deliberately deferred
+- Desktop capture / real desktop agent (validation uses manual API calls via curl as before).
+- Real LLM (still 100% deterministic template from previous slice; no AI integration).
+- Any analytics, task mining depth, automation.
+- Billing/SSO/MFA/K8s/enterprise.
+- Polished dashboard or production UI (this is "very basic" dev workbench only).
+- Over-audit or compliance features.
+- Full RBAC UI or advanced permission modeling (lean check only).
+- Auto anything for SOPs (status changes are explicit human actions only).
+- New branches, history changes, or deletion of prior files.
+
+### C. Files changed
+- apps/api-server/src/modules/agent/agent-sessions.controller.ts (added the 2 GET read + 4 review action methods)
+- apps/web/app/sop-viewer/page.tsx (new minimal viewer page)
+- FOUNDATION_STATUS.md (this section + prior preservation)
+
+### D. Exact validation outputs
+Executed the exact 18-step sequence (after typecheck/lint/build passed):
+- Login: 201, token with real client_id from control.
+- Create session → real ID.
+- Upload safe events (4 events, no typedText/raw) → 201 accepted.
+- Stop.
+- Build timeline → 200 with steps.
+- Generate SOP → 200, DRAFT.
+- GET /timeline → 200 with steps.
+- GET /sop → 200 with content + DRAFT status.
+- PATCH (edit content) → 200, content updated.
+- Submit for review → 201, status IN_REVIEW.
+- Approve → 201, status APPROVED.
+- Separate flow for reject (new session or second draft): submit → reject with reason → 201, status REJECTED + reason in content.
+- Client DB queries (psql): sessions/events present with data; workflows with steps; sop_documents with correct status transitions (DRAFT→IN_REVIEW→APPROVED, and DRAFT→REJECTED with reason).
+- Control DB: only acme client metadata. No sessions/events/sop_documents tables or data (relation errors on count queries).
+
+All calls used valid tokens + X-Client-Id: acme. Guard isolation and permission checks worked (mismatch 403, no-JWT 401, no-header 400; approve/reject succeeded only with reviewer/admin).
+
+### E. UI route/page created
+- apps/web/app/sop-viewer/page.tsx : The minimal workbench exactly as scoped. Runs at http://localhost:3000/sop-viewer (when web dev server is up alongside API on 4000). Functional for the review loop demo.
+
+### F. Client DB proof
+Post full flow + review actions:
+- Real session, events, workflow, and sop_document records with correct foreign keys and data.
+- SopDocument.status correctly moves through DRAFT, IN_REVIEW, APPROVED (and REJECTED in separate flow).
+- PATCH updates reflected in content.
+- (Confirmed via the psql selects in the validation command; data present and consistent with actions.)
+
+### G. Control DB isolation proof
+- Only "acme" in clients table + corresponding route/license.
+- Queries for sessions, events, workflows, sop_documents return "relation does not exist" (tables never created in control DB).
+- Zero operational data (confirmed in the validation psql section).
+
+### H. Final status
+**SOP Review + Minimal Viewer passed.**
+
+All rules followed. Baseline checks passed before and after code. Small commits. Working tree clean. The human review loop (read + edit + submit/approve/reject with status) is now complete as the minimum for this slice. The /sop-viewer provides the required basic workbench. No scope violations. The core MVP value chain now supports full review.
+
+**Current branch:** feature/client-data-plane-session-events (clean)
+**Tag:** foundation-db-backed-v0 (pushed on baseline)
+
+This slice is complete. Do not proceed to further features without explicit next instruction.
+- Client DB tables applied via `prisma db push` against the client-a connection string (for local dev validation; production would use proper migrations per client).
+- Connection string in the seeded client_route was adjusted (host-mapped port) so the host-run api-server can reach the Dockerized client-a DB.
+- All DB operations use the live route record from control DB (real findUnique in resolver for 'acme' from X-Client-Id or host).
+
+### Validation (post-impl, on feature branch)
+- Re-ran typecheck / lint / build after code: clean (baseline + new slice passes; no lint/type regressions).
+- Full live curl sequence (real token from /login now carries the actual DB client_id; all against the running server on the feature branch):
+  - Login: 201 (token with real clientId d7a3ea06-... from control record).
+  - Config (valid JWT + X-Client-Id: acme): 200.
+  - Create session: 200, real sessionId returned from client DB (e.g. e6dc6b59-...).
+  - Start: 201, DB record updated.
+  - Batch 1 event: 201, event persisted in client DB linked to session.
+  - Stop: 201, DB record updated.
+  - Mismatch (wrong client_id in JWT + correct header): 403 "Client isolation violation..." (real DB lookup + guard check).
+  - No JWT: 401.
+  - No X-Client-Id (dev mode): 400 "Unable to resolve client...".
+- Guard and resolver isolation fully exercised with live data. No bypass.
+
+### Key Commands (this slice)
+```bash
+# (git fetch/verify + tag + branch creation + baseline checks done first)
+cd FlowmindAI/apps/api-server && npx prisma generate
+# (schema edit + commit)
+cd FlowmindAI && git commit -m "feat(client-data-plane): add ... models..."
+# (factory file + module + commit)
+# (guard wire + commit)
+# (controller real impl + commit)
+docker exec fm-postgres-control psql ... UPDATE client_routes SET db_connection_ref=... (host url)
+npm run api:dev
+# (validation curls as listed above)
+npm run typecheck && npm run lint && npm run build
+```
+
+### Confirmation of Rules Followed
+- No new product features outside the declared slice.
+- No desktop capture, AI, SOP, dashboard.
+- No history rewrite, no deletion of existing files.
+- Architecture preserved (control = routing/metadata only; everything client operational goes through client resolver + per-client prisma).
+- Small commits, checks before/after code, FOUNDATION_STATUS updated (this section).
+- Current state on feature branch is the validated extension of the tagged foundation baseline.
+
+This slice is complete and ready for the next constrained piece (e.g. desktop agent consuming these endpoints, or capture policy, or client user provisioning). All per the original product constraints and development order.
