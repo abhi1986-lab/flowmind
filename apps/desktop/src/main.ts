@@ -30,63 +30,267 @@ function createWindow() {
     title: 'FlowMind Recorder',
   });
 
-  // In real: load a small React/Vite renderer or html UI
+  // Minimal manual capture UI for MVP v0 - functional only, no real capture
   const html = `
     <!doctype html>
     <html>
       <head><meta charset="utf-8"/><title>FlowMind</title>
-      <style>body{font-family:system-ui;padding:20px;background:#0f172a;color:#e2e8f0} .status{padding:12px;border-radius:6px;margin:12px 0;font-weight:600} .recording{background:#b91c1c;color:white} .idle{background:#334155}</style>
+      <style>
+        body{font-family:system-ui;padding:16px;background:#0f172a;color:#e2e8f0;font-size:14px}
+        .status{padding:8px 12px;border-radius:4px;margin:8px 0;font-weight:600}
+        .recording{background:#b91c1c;color:white}
+        .idle{background:#334155}
+        .loggedin{background:#166534;color:white}
+        button{margin:4px;padding:6px 10px;cursor:pointer}
+        .section{margin:12px 0;padding:8px;border:1px solid #334155;border-radius:4px}
+        .log{white-space:pre-wrap;font-family:monospace;font-size:11px;background:#1e2937;padding:6px;margin-top:4px;max-height:80px;overflow:auto}
+        input{padding:4px;margin:2px}
+      </style>
       </head>
       <body>
-        <h1>FlowMind AI</h1>
-        <p>Operational Workflow Recorder (MVP)</p>
-        <div id="status" class="status idle">IDLE - Not recording</div>
-        
-        <button id="login">Login (demo)</button>
-        <button id="start" disabled>Start Recording</button>
-        <button id="pause" disabled>Pause</button>
-        <button id="stop" disabled>Stop</button>
-        
-        <p style="margin-top:24px;font-size:12px;opacity:0.7">
-          This is the visible recording shell.<br/>
-          Recording indicator must always be obvious while active.<br/>
-          Full capture (app/window/events/screenshots + encrypted buffer) comes next.
+        <h1>FlowMind AI - Manual Capture v0</h1>
+        <div id="loginStatus" class="status idle">Not logged in</div>
+        <button id="loginBtn">Login (demo contributor@acme.test)</button>
+
+        <div class="section">
+          <div>Session: <span id="sessionId">-</span></div>
+          <div>Status: <span id="sessionStatus">IDLE</span></div>
+          <div>Events sent: <span id="eventCount">0</span></div>
+          <button id="createBtn" disabled>Create Session</button>
+          <button id="startBtn" disabled>Start Session</button>
+          <button id="stopBtn" disabled>Stop Session</button>
+        </div>
+
+        <div class="section">
+          <strong>Manual Safe Events (no typedText/raw keys ever):</strong><br>
+          <button id="appBtn" disabled>App Changed</button>
+          <button id="winBtn" disabled>Window Changed</button>
+          <button id="clickBtn" disabled>Mouse Clicked</button>
+          <button id="keyBtn" disabled>Key Action: TAB_NAVIGATION</button><br>
+          <input id="noteInput" placeholder="Note text" style="width:180px" disabled>
+          <button id="noteBtn" disabled>User Note Added</button>
+        </div>
+
+        <div class="section">
+          <strong>SOP Controls (after Stop):</strong><br>
+          <button id="timelineBtn" disabled>Build Timeline</button>
+          <button id="sopBtn" disabled>Generate SOP Draft</button>
+          <button id="viewerBtn" disabled>Open SOP Viewer (use session ID)</button>
+        </div>
+
+        <div>Last API response: <div id="lastResponse" class="log">-</div></div>
+        <div id="error" style="color:#f87171"></div>
+
+        <p style="margin-top:12px;font-size:11px;opacity:0.7">
+          Manual only. Visible controls. Safe events only. Token in memory. X-Client-Id: acme.
         </p>
-        
+
         <script>
-          const statusEl = document.getElementById('status');
-          const startBtn = document.getElementById('start');
-          const pauseBtn = document.getElementById('pause');
-          const stopBtn = document.getElementById('stop');
+          const API = 'http://localhost:4000';
+          const CLIENT_ID = 'acme';
 
-          let recording = false;
+          let token = null;
+          let currentSessionId = null;
+          let eventCount = 0;
+          let isRecording = false;
 
-          function setRecording(on) {
-            recording = on;
-            statusEl.textContent = on ? '● RECORDING - Visible to user' : 'IDLE - Not recording';
-            statusEl.className = 'status ' + (on ? 'recording' : 'idle');
-            startBtn.disabled = on;
-            pauseBtn.disabled = !on;
-            stopBtn.disabled = !on;
+          const loginStatus = document.getElementById('loginStatus');
+          const sessionIdEl = document.getElementById('sessionId');
+          const sessionStatusEl = document.getElementById('sessionStatus');
+          const eventCountEl = document.getElementById('eventCount');
+          const lastResponseEl = document.getElementById('lastResponse');
+          const errorEl = document.getElementById('error');
+
+          const loginBtn = document.getElementById('loginBtn');
+          const createBtn = document.getElementById('createBtn');
+          const startBtn = document.getElementById('startBtn');
+          const stopBtn = document.getElementById('stopBtn');
+          const appBtn = document.getElementById('appBtn');
+          const winBtn = document.getElementById('winBtn');
+          const clickBtn = document.getElementById('clickBtn');
+          const keyBtn = document.getElementById('keyBtn');
+          const noteInput = document.getElementById('noteInput');
+          const noteBtn = document.getElementById('noteBtn');
+          const timelineBtn = document.getElementById('timelineBtn');
+          const sopBtn = document.getElementById('sopBtn');
+          const viewerBtn = document.getElementById('viewerBtn');
+
+          function updateUI() {
+            sessionIdEl.textContent = currentSessionId || '-';
+            sessionStatusEl.textContent = isRecording ? 'RECORDING' : (currentSessionId ? 'STOPPED' : 'IDLE');
+            eventCountEl.textContent = eventCount;
+            const loggedIn = !!token;
+            loginStatus.textContent = loggedIn ? 'Logged in (memory token)' : 'Not logged in';
+            loginStatus.className = 'status ' + (loggedIn ? 'loggedin' : 'idle');
+            const canControl = loggedIn && !!currentSessionId;
+            startBtn.disabled = !canControl || isRecording;
+            stopBtn.disabled = !canControl || !isRecording;
+            appBtn.disabled = !canControl || !isRecording;
+            winBtn.disabled = !canControl || !isRecording;
+            clickBtn.disabled = !canControl || !isRecording;
+            keyBtn.disabled = !canControl || !isRecording;
+            noteInput.disabled = !canControl || !isRecording;
+            noteBtn.disabled = !canControl || !isRecording;
+            createBtn.disabled = !loggedIn || !!currentSessionId;
+            const afterStop = loggedIn && currentSessionId && !isRecording;
+            timelineBtn.disabled = !afterStop;
+            sopBtn.disabled = !afterStop;
+            viewerBtn.disabled = !afterStop;
           }
 
-          document.getElementById('login').onclick = () => {
-            // In real app: open login form, call API /auth/login, store token securely (keytar or safeStorage)
-            alert('Demo login would call backend and store JWT for acme client. Token would be attached to uploads.');
+          function showResponse(data) {
+            lastResponseEl.textContent = JSON.stringify(data, null, 2);
+            errorEl.textContent = '';
+          }
+
+          function showError(msg) {
+            errorEl.textContent = msg;
+            console.error(msg);
+          }
+
+          async function apiCall(method, path, body = null) {
+            const headers = {
+              'Content-Type': 'application/json',
+              'X-Client-Id': CLIENT_ID
+            };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            const opts = { method, headers };
+            if (body) opts.body = JSON.stringify(body);
+            try {
+              const res = await fetch(API + path, opts);
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) throw new Error(data.message || 'HTTP ' + res.status);
+              showResponse(data);
+              return data;
+            } catch (e) {
+              showError(e.message);
+              throw e;
+            }
+          }
+
+          loginBtn.onclick = async () => {
+            try {
+              const data = await apiCall('POST', '/auth/login', {
+                email: 'contributor@acme.test',
+                password: 'demo123'
+              });
+              token = data.accessToken;
+              updateUI();
+              showResponse({message: 'Login success, token in memory'});
+            } catch (e) {}
           };
 
-          startBtn.onclick = () => {
-            // Must be user gesture. Backend will receive /agent/sessions + start
-            setRecording(true);
-            // TODO: fetch client config (policy), begin capture loop
-            console.log('START recording (shell)');
+          createBtn.onclick = async () => {
+            try {
+              const data = await apiCall('POST', '/agent/sessions', {});
+              currentSessionId = data.sessionId;
+              isRecording = false;
+              eventCount = 0;
+              updateUI();
+            } catch (e) {}
           };
 
-          pauseBtn.onclick = () => { setRecording(false); console.log('PAUSE (shell)'); };
-          stopBtn.onclick = () => { setRecording(false); console.log('STOP + upload (shell)'); };
+          startBtn.onclick = async () => {
+            if (!currentSessionId) return;
+            try {
+              await apiCall('POST', '/agent/sessions/' + currentSessionId + '/start');
+              isRecording = true;
+              updateUI();
+            } catch (e) {}
+          };
 
-          // Always show obvious state
-          setRecording(false);
+          stopBtn.onclick = async () => {
+            if (!currentSessionId) return;
+            try {
+              await apiCall('POST', '/agent/sessions/' + currentSessionId + '/stop');
+              isRecording = false;
+              updateUI();
+            } catch (e) {}
+          };
+
+          function sendEvent(eventObj) {
+            if (!currentSessionId || !isRecording) return;
+            const payload = {
+              sessionId: currentSessionId,
+              events: [eventObj]
+            };
+            apiCall('POST', '/agent/events/batch', payload).then(() => {
+              eventCount++;
+              updateUI();
+            }).catch(() => {});
+          }
+
+          appBtn.onclick = () => sendEvent({
+            sequenceNo: eventCount + 1,
+            eventType: 'APP_CHANGED',
+            timestamp: new Date().toISOString(),
+            appName: 'DemoBrowser',
+            windowTitle: 'Main Window'
+          });
+
+          winBtn.onclick = () => sendEvent({
+            sequenceNo: eventCount + 1,
+            eventType: 'WINDOW_CHANGED',
+            timestamp: new Date().toISOString(),
+            appName: 'DemoBrowser',
+            windowTitle: 'Dashboard'
+          });
+
+          clickBtn.onclick = () => sendEvent({
+            sequenceNo: eventCount + 1,
+            eventType: 'MOUSE_CLICK',
+            timestamp: new Date().toISOString(),
+            appName: 'DemoBrowser',
+            windowTitle: 'Main Window'
+          });
+
+          keyBtn.onclick = () => sendEvent({
+            sequenceNo: eventCount + 1,
+            eventType: 'KEY_ACTION',
+            timestamp: new Date().toISOString(),
+            appName: 'DemoBrowser',
+            windowTitle: 'Main Window',
+            metadata: { action: 'TAB_NAVIGATION' }
+          });
+
+          noteBtn.onclick = () => {
+            const note = noteInput.value.trim();
+            if (!note) return;
+            sendEvent({
+              sequenceNo: eventCount + 1,
+              eventType: 'USER_NOTE',
+              timestamp: new Date().toISOString(),
+              appName: 'DemoBrowser',
+              windowTitle: 'Main Window',
+              metadata: { note: note }
+            });
+            noteInput.value = '';
+          };
+
+          timelineBtn.onclick = async () => {
+            if (!currentSessionId) return;
+            try {
+              await apiCall('POST', '/agent/sessions/' + currentSessionId + '/build-timeline');
+            } catch (e) {}
+          };
+
+          sopBtn.onclick = async () => {
+            if (!currentSessionId) return;
+            try {
+              await apiCall('POST', '/agent/sessions/' + currentSessionId + '/generate-sop-draft');
+            } catch (e) {}
+          };
+
+          viewerBtn.onclick = () => {
+            if (!currentSessionId) return;
+            const url = 'http://localhost:3000/sop-viewer';
+            alert('Open ' + url + ' in browser and enter session ID: ' + currentSessionId + ' (or use the fetch in the viewer with your token).');
+            // In real Electron: require('electron').shell.openExternal(url);
+          };
+
+          // Init
+          updateUI();
+          setInterval(updateUI, 1000); // simple refresh
         </script>
       </body>
     </html>
