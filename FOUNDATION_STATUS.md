@@ -192,3 +192,73 @@ Confirmed by schema (only clients, client_routes, client_licenses, platform_admi
 **DB-backed foundation passed.**
 
 All infrastructure, migration, seeding, short-circuit removal, resolver, and the 6 required endpoint behaviors validated against a real running control DB record for "acme". Client isolation and guard enforcement working as designed with live data.
+
+## Client Data Plane + Session/Event Backbone (feature/client-data-plane-session-events)
+
+Implemented the next foundation slice per development order and constraints.
+
+### Branch & Process
+- Created from clean baseline (after tagging foundation-db-backed-v0 on main).
+- Switched to feature/client-data-plane-session-events.
+- First actions (per rules): pulled/verified latest from origin, ran `npm run typecheck`, `npm run lint`, `npm run build` — all passed cleanly. Foundation confirmed intact before any new code.
+- Small logical commits only.
+- Strict scope followed: only Client Data Plane + Session/Event Backbone. No desktop, AI, SOP, dashboard.
+
+### Small Logical Commits
+1. feat(client-data-plane): add session, event, artifact, user, capture_policy models to Prisma schema
+2. feat(client-data-plane): add ClientPrismaFactory for per-client DB connections using adapter
+3. feat(client-data-plane): wire ClientPrismaFactory into ClientResolverGuard (attaches req.clientPrisma after isolation check)
+4. feat(session-event-backbone): implement real persistence in agent endpoints using client DB (create/update sessions + events via the factory-provided prisma)
+
+### Key Implementation
+- Client models added to the single schema (used exclusively when PrismaClient is instantiated against a client DB url from client_routes; control DB unaffected).
+- ClientPrismaFactory (in global PrismaModule): creates/caches PrismaClient + @prisma/adapter-pg + Pool for the exact dbConnectionRef of the resolved client. This + the guard is the runtime enforcement of "Client Data Plane" isolation.
+- Guard enhancement: after the hard client_id match check, attaches the correct clientPrisma to the typed AuthenticatedRequest (in addition to accessScope).
+- Real (non-stub) logic in AgentSessionsController (still fully protected by JwtAuthGuard + ClientResolverGuard):
+  - POST /agent/sessions → user upsert (demo) + session.create in the client's DB; returns real DB id.
+  - POST /agent/sessions/:id/start → session.update status + startedAt in client DB.
+  - POST /agent/sessions/:id/stop → session.update status + endedAt in client DB.
+  - POST /agent/events/batch → createMany events linked to the sessionId in client DB.
+- /agent/config left as stub (policy can be next within this slice if desired).
+- Client DB tables applied via `prisma db push` against the client-a connection string (for local dev validation; production would use proper migrations per client).
+- Connection string in the seeded client_route was adjusted (host-mapped port) so the host-run api-server can reach the Dockerized client-a DB.
+- All DB operations use the live route record from control DB (real findUnique in resolver for 'acme' from X-Client-Id or host).
+
+### Validation (post-impl, on feature branch)
+- Re-ran typecheck / lint / build after code: clean (baseline + new slice passes; no lint/type regressions).
+- Full live curl sequence (real token from /login now carries the actual DB client_id; all against the running server on the feature branch):
+  - Login: 201 (token with real clientId d7a3ea06-... from control record).
+  - Config (valid JWT + X-Client-Id: acme): 200.
+  - Create session: 200, real sessionId returned from client DB (e.g. e6dc6b59-...).
+  - Start: 201, DB record updated.
+  - Batch 1 event: 201, event persisted in client DB linked to session.
+  - Stop: 201, DB record updated.
+  - Mismatch (wrong client_id in JWT + correct header): 403 "Client isolation violation..." (real DB lookup + guard check).
+  - No JWT: 401.
+  - No X-Client-Id (dev mode): 400 "Unable to resolve client...".
+- Guard and resolver isolation fully exercised with live data. No bypass.
+
+### Key Commands (this slice)
+```bash
+# (git fetch/verify + tag + branch creation + baseline checks done first)
+cd FlowmindAI/apps/api-server && npx prisma generate
+# (schema edit + commit)
+cd FlowmindAI && git commit -m "feat(client-data-plane): add ... models..."
+# (factory file + module + commit)
+# (guard wire + commit)
+# (controller real impl + commit)
+docker exec fm-postgres-control psql ... UPDATE client_routes SET db_connection_ref=... (host url)
+npm run api:dev
+# (validation curls as listed above)
+npm run typecheck && npm run lint && npm run build
+```
+
+### Confirmation of Rules Followed
+- No new product features outside the declared slice.
+- No desktop capture, AI, SOP, dashboard.
+- No history rewrite, no deletion of existing files.
+- Architecture preserved (control = routing/metadata only; everything client operational goes through client resolver + per-client prisma).
+- Small commits, checks before/after code, FOUNDATION_STATUS updated (this section).
+- Current state on feature branch is the validated extension of the tagged foundation baseline.
+
+This slice is complete and ready for the next constrained piece (e.g. desktop agent consuming these endpoints, or capture policy, or client user provisioning). All per the original product constraints and development order.
