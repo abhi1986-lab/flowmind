@@ -11,8 +11,9 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ClientResolverGuard } from '../client-resolver/client-resolver.guard';
 import type { AuthenticatedRequest } from '../client-resolver/client-resolver.guard';
-import { TimelineBuilder } from './timeline.builder';
+import { TimelineBuilder, type WorkflowStep } from './timeline.builder';
 import { SopDraftGenerator } from './sop.generator';
+import type { Prisma } from '@prisma/client';
 
 /**
  * Agent-facing endpoints (MVP).
@@ -122,7 +123,8 @@ export class AgentSessionsController {
   @Post('events/batch')
   async uploadEvents(
     @Req() req: AuthenticatedRequest,
-    @Body() body: { sessionId?: string; events?: any[] },
+    @Body()
+    body: { sessionId?: string; events?: Array<Record<string, unknown>> },
   ) {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
@@ -130,13 +132,14 @@ export class AgentSessionsController {
     const events = body.events || [];
 
     // Strict MVP rule: Reject any typedText or raw keystroke fields (keylogging prohibition)
-    const forbidden = events.some(
-      (e: any) =>
-        e.typedText !== undefined ||
-        e.rawKeystrokes !== undefined ||
-        (e.metadata &&
-          (e.metadata.typedText || e.metadata.keystrokes || e.metadata.raw)),
-    );
+    const forbidden = events.some((e: Record<string, unknown>) => {
+      const meta = e['metadata'] as Record<string, unknown> | undefined;
+      return (
+        e['typedText'] !== undefined ||
+        e['rawKeystrokes'] !== undefined ||
+        (meta && (meta['typedText'] || meta['keystrokes'] || meta['raw']))
+      );
+    });
     if (forbidden) {
       throw new Error(
         'Forbidden: typedText or raw keystroke data is not allowed in event ingestion (keylogging prohibition).',
@@ -146,14 +149,16 @@ export class AgentSessionsController {
     if (sessionId && events.length > 0) {
       // Basic batch insert for backbone
       await clientPrisma.event.createMany({
-        data: events.map((e: any, idx: number) => ({
+        data: events.map((e: Record<string, unknown>, idx: number) => ({
           sessionId,
-          sequenceNo: e.sequenceNo ?? idx + 1,
-          eventType: e.eventType,
-          timestamp: e.timestamp ? new Date(e.timestamp) : new Date(),
-          appName: e.appName,
-          windowTitle: e.windowTitle,
-          metadata: e.metadata || {},
+          sequenceNo: (e['sequenceNo'] as number) ?? idx + 1,
+          eventType: e['eventType'] as string,
+          timestamp: e['timestamp']
+            ? new Date(e['timestamp'] as string)
+            : new Date(),
+          appName: e['appName'] as string | undefined,
+          windowTitle: e['windowTitle'] as string | undefined,
+          metadata: (e['metadata'] as Prisma.InputJsonValue) || undefined,
         })),
       });
     }
@@ -185,12 +190,12 @@ export class AgentSessionsController {
       where: { sourceSessionId: sessionId },
       update: {
         title: `Workflow from session ${sessionId}`,
-        steps: steps as any,
+        steps: steps as unknown as Prisma.InputJsonValue,
       },
       create: {
         sourceSessionId: sessionId,
         title: `Workflow from session ${sessionId}`,
-        steps: steps as any,
+        steps: steps as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -228,12 +233,12 @@ export class AgentSessionsController {
         data: {
           sourceSessionId: sessionId,
           title: `Workflow from session ${sessionId}`,
-          steps: steps as any,
+          steps: steps as unknown as Prisma.InputJsonValue,
         },
       });
     }
 
-    const steps = (workflow.steps as any[]) || [];
+    const steps = (workflow.steps as unknown as WorkflowStep[]) || [];
     const sopContent = this.sopDraftGenerator.generateSopDraft(
       workflow.title,
       steps,
@@ -244,7 +249,7 @@ export class AgentSessionsController {
         workflowId: workflow.id,
         title: sopContent.title,
         status: 'DRAFT',
-        content: sopContent as any,
+        content: sopContent as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -322,7 +327,7 @@ export class AgentSessionsController {
   @Patch('sop-documents/:id')
   async updateSopDraft(
     @Param('id') id: string,
-    @Body() body: { title?: string; content?: any },
+    @Body() body: { title?: string; content?: unknown },
     @Req() req: AuthenticatedRequest,
   ) {
     const scope = req.accessScope;
@@ -338,7 +343,7 @@ export class AgentSessionsController {
       where: { id },
       data: {
         title: body.title ?? sop.title,
-        content: body.content ?? sop.content,
+        content: (body.content as Prisma.InputJsonValue) ?? sop.content,
         updatedAt: new Date(),
       },
     });
@@ -433,7 +438,8 @@ export class AgentSessionsController {
       throw new Error('Can only reject SOPs that are IN_REVIEW or DRAFT');
     }
 
-    const currentContent = (sop.content as any) || {};
+    const currentContent =
+      (sop.content as unknown as Record<string, unknown>) || {};
     const updatedContent = body.reason
       ? { ...currentContent, rejectionReason: body.reason }
       : currentContent;
@@ -442,7 +448,7 @@ export class AgentSessionsController {
       where: { id },
       data: {
         status: 'REJECTED',
-        content: updatedContent,
+        content: updatedContent as unknown as Prisma.InputJsonValue,
         updatedAt: new Date(),
       },
     });

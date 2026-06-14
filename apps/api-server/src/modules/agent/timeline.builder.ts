@@ -55,11 +55,20 @@ export class TimelineBuilder {
         // Group action inside current context
         let desc = '';
         if (ev.eventType === 'MOUSE_CLICK') desc = 'Performed mouse click';
-        else if (ev.eventType === 'KEY_ACTION')
-          desc = `Key action: ${(ev.metadata as any)?.action || 'navigation'}`;
-        else if (ev.eventType === 'USER_NOTE')
-          desc = `Note: ${(ev.metadata as any)?.note || ev.metadata || ''}`;
-        else if (ev.eventType === 'SCREEN_DELTA')
+        else if (ev.eventType === 'KEY_ACTION') {
+          const meta = ev.metadata as
+            | Record<string, unknown>
+            | null
+            | undefined;
+          desc = `Key action: ${(meta?.action as string) || 'navigation'}`;
+        } else if (ev.eventType === 'USER_NOTE') {
+          const meta = ev.metadata as
+            | Record<string, unknown>
+            | null
+            | undefined;
+          const noteVal: unknown = meta?.note ?? meta ?? '';
+          desc = `Note: ${String(noteVal)}`;
+        } else if (ev.eventType === 'SCREEN_DELTA')
           desc = 'Significant screen change detected';
         else desc = ev.eventType;
 

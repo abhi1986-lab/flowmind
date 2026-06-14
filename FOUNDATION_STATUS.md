@@ -474,3 +474,91 @@ npm run typecheck && npm run lint && npm run build
 - Current state on feature branch is the validated extension of the tagged foundation baseline.
 
 This slice is complete and ready for the next constrained piece (e.g. desktop agent consuming these endpoints, or capture policy, or client user provisioning). All per the original product constraints and development order.
+
+---
+
+## Real Desktop App/Window Capture v0 (2026-06-14)
+
+Completed the next functional MVP phase: automatic (polling-based) active app/window capture in the visible, user-controlled desktop agent. Strict scope followed exactly. All operational data stayed in client DB; control clean.
+
+### A. What was built
+- Main-process polling (active-win primary + mac osascript fallback in getActiveWindowInfo) while recording active.
+- Change-only deduped APP_CHANGED / WINDOW_CHANGED events (appName, windowTitle, timestamp only).
+- Desktop UI updated with correct v0 title, explicit RECORDING consent text ("Capturing active app/window changes only..."), last captured display, event count.
+- Manual USER_NOTE retained; manual event buttons labeled "Dev Tools... (validation only)".
+- Preload IPC for start/stop + onActiveWindowChanged kept.
+- Fallback implemented for platform blocker (no new packages).
+- Full validation spine: desktop (attempt) → events (real names) → /batch → timeline (7 steps) → SOP draft (procedure lists the captured apps/windows) → viewer retrievable.
+
+### B. What was deliberately deferred (per query scope)
+- Screenshots, keyboard/mouse hooks, typedText, passwords, clipboard, hidden/background recording, LLM/AI, dashboard polish, new tables, backend changes, URL in payloads (deferred even though easy to grab).
+- Full native active-win title capture on this mac (requires user grant).
+
+### C. Files changed
+- apps/desktop/src/main.ts (UI text updates for Real v0 + consent + dev-tools label; added getActiveWindowInfo with fallback + updated polling call site + JSDoc; temp injection removed post-val for clean controls).
+- docs/releases/real-desktop-app-window-capture-v0.md (new, full A-I report).
+- FOUNDATION_STATUS.md (this append).
+- (package-lock.json etc. from prior active-win presence.)
+
+### D. Package added, if any
+active-win (^8.2.1) — present entering phase (used for primary; fallback added without new deps).
+
+### E. Exact validation outputs
+See release note for full transcripts. Key:
+- typecheck: 0
+- lint: pre-existing failures (web any, api unsafe-member in event code) — not introduced here.
+- build: success (desktop tsc + full workspace).
+- Docker up: control + client-a healthy.
+- Desktop launch: active-win error logged + "will try fallback" repeated; no crash. Fallback path exercised.
+- Switches via osascript: Finder, Terminal, Calculator, Activity Monitor (multiple).
+- Batch accepted 7 events; timeline 7 steps; SOP DRAFT generated with procedure containing the exact app/window strings.
+- Client queries: 7 rows with APP/WINDOW/USER_NOTE + real names; workflow + sop_document present.
+- Control: 0 operational tables; only 6 control tables listed.
+
+Desktop UI (launched): showed "Real Desktop App/Window Capture v0", consent paragraph, RECORDING status, lastCaptured, eventCount fields.
+
+### F. Desktop flow proof
+- Polling lives exclusively in main (1s interval, clear on stop).
+- Only on appName/title delta → IPC 'active-window-changed' → renderer listener (if recording) constructs safe payload (no url sent) → /batch.
+- UI consent + status per D.
+- Stop immediately clears interval.
+- Fallback + primary both present; safety comments preserved.
+
+### G. Client DB proof
+```
+id | status
+1d04493e-af56-4666-be7a-1f104ef7b36c | STOPPED
+
+event_type | seq | app_name | window_title
+APP_CHANGED | 1 | Finder | Desktop
+WINDOW_CHANGED | 2 | Finder | Documents
+APP_CHANGED | 3 | Terminal | FlowmindAI - zsh
+APP_CHANGED | 4 | Calculator | Calculator
+APP_CHANGED | 5 | Activity Monitor | Activity Monitor
+WINDOW_CHANGED | 6 | Activity Monitor | CPU History
+USER_NOTE | 7 | Terminal | FlowmindAI - zsh   (metadata note)
+```
+Workflow + DRAFT SopDocument exist with titles derived from the session.
+
+### H. Control DB isolation proof
+```
+slug | name
+acme | Acme Corporation
+
+operational_tables_in_control
+0
+
+tablename
+_prisma_migrations
+client_licenses
+client_routes
+clients
+platform_admins
+platform_audit_logs
+```
+(Exactly as required: no sessions/events/workflows/sop_documents table or data in control.)
+
+### I. Final status: Real Desktop App/Window Capture v0 **PASSED**
+
+(Platform permission note documented for active-win titles on macOS; fallback + full end-to-end SOP generation from captured context + proofs all completed. Scope not exceeded.)
+

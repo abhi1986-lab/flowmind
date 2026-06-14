@@ -64,8 +64,9 @@ export default function MinimalSopViewer() {
       } else {
         setMessage('Login failed: ' + (data.message || JSON.stringify(data)));
       }
-    } catch (e: any) {
-      setMessage('Login error: ' + e.message);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessage('Login error: ' + msg);
     } finally {
       setIsLoading(false);
     }
@@ -98,8 +99,9 @@ export default function MinimalSopViewer() {
         setEditContent(JSON.stringify(sopData.sop, null, 2));
       }
       setMessage('Timeline and SOP loaded.');
-    } catch (e: any) {
-      setMessage('Fetch error: ' + e.message);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessage('Fetch error: ' + msg);
     } finally {
       setIsLoading(false);
     }
@@ -130,8 +132,9 @@ export default function MinimalSopViewer() {
       setMessage('SOP updated (PATCH).');
       // refresh
       await fetchTimelineAndSop();
-    } catch (e: any) {
-      setMessage('Save error: ' + e.message);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessage('Save error: ' + msg);
     } finally {
       setIsLoading(false);
     }
@@ -142,9 +145,9 @@ export default function MinimalSopViewer() {
     setIsLoading(true);
     setMessage('');
     try {
-      let body: any = {};
-      let method = 'POST';
-      let url = `${API_BASE}/agent/sop-documents/${sop.sopDocumentId}/${action}`;
+      let body: Record<string, unknown> = {};
+      const method = 'POST';
+      const url = `${API_BASE}/agent/sop-documents/${sop.sopDocumentId}/${action}`;
 
       if (action === 'reject' && rejectReason) {
         body = { reason: rejectReason };
@@ -163,8 +166,9 @@ export default function MinimalSopViewer() {
       setMessage(`${action} result: ${JSON.stringify(data)}`);
       // refresh sop
       await fetchTimelineAndSop();
-    } catch (e: any) {
-      setMessage(`${action} error: ${e.message}`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessage(`${action} error: ${msg}`);
     } finally {
       setIsLoading(false);
     }

@@ -8,15 +8,54 @@
  * - Local encrypted buffer (to be implemented)
  * - Upload to backend with proper client JWT (obtained at login)
  *
- * This is the absolute minimal shell to satisfy the platform foundation + prepare for real capture.
- * Full implementation (screen capture, event model, secure storage via keytar/electron-safe-storage, etc.)
- * follows Desktop Agent LLD after the first foundation milestone.
+ * Real Desktop App/Window Capture v0 (per phase scope): automatic active app/window polling (1s, change-only APP_CHANGED/WINDOW_CHANGED), visible RECORDING UX, user-controlled start/stop. Manual test events as dev tools only. Uses existing /events/batch. No screenshots, keys, text, passwords, hidden recording, AI, new tables. URL capture deferred (not sent). Client isolation + control no-op data preserved.
  */
 
 import { app, BrowserWindow, ipcMain } from 'electron';
 import * as path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+// @ts-ignore - active-win is CJS, works in main process
+const activeWin = require('active-win');
+
+const execPromise = promisify(exec);
+
+async function getActiveWindowInfo() {
+  // Primary: active-win (may require Accessibility/Screen Recording perms on macOS)
+  try {
+    const win = await activeWin();
+    if (win) return win;
+  } catch (err) {
+    console.error('active-win error (will try fallback):', (err as Error)?.message || err);
+  }
+  // Minimal OS-specific fallback for macOS (no new packages, uses built-in osascript + System Events)
+  if (process.platform === 'darwin') {
+    try {
+      const { stdout: appOut } = await execPromise(
+        `osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true' 2>/dev/null || echo 'Unknown'`
+      );
+      const appName = (appOut || '').trim() || 'Unknown';
+      let windowTitle = '';
+      try {
+        const { stdout: winOut } = await execPromise(
+          `osascript -e 'tell application "System Events" to get name of window 1 of (first application process whose frontmost is true)' 2>/dev/null || echo ''`
+        );
+        windowTitle = (winOut || '').trim();
+      } catch {}
+      return { owner: { name: appName }, title: windowTitle } as any;
+    } catch (e) {
+      console.error('mac fallback osascript error:', e);
+    }
+  }
+  return null;
+}
 
 let mainWindow: BrowserWindow | null = null;
+
+let recordingInterval: NodeJS.Timeout | null = null;
+let lastApp = '';
+let lastTitle = '';
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -30,7 +69,7 @@ function createWindow() {
     title: 'FlowMind Recorder',
   });
 
-  // Minimal manual capture UI for MVP v0 - functional only, no real capture
+  // Real active window/app capture UI for Desktop App/Window Capture v0: polling in main, IPC to renderer, auto APP/WINDOW on change while recording. Manual buttons kept as dev tools only.
   const html = `
     <!doctype html>
     <html>
@@ -48,7 +87,7 @@ function createWindow() {
       </style>
       </head>
       <body>
-        <h1>FlowMind AI - Manual Capture v0</h1>
+        <h1>FlowMind AI - Real Desktop App/Window Capture v0</h1>
         <div id="loginStatus" class="status idle">Not logged in</div>
         <button id="loginBtn">Login (demo contributor@acme.test)</button>
 
@@ -56,13 +95,14 @@ function createWindow() {
           <div>Session: <span id="sessionId">-</span></div>
           <div>Status: <span id="sessionStatus">IDLE</span></div>
           <div>Events sent: <span id="eventCount">0</span></div>
+          <div>Last captured: <span id="lastCaptured">-</span></div>
           <button id="createBtn" disabled>Create Session</button>
           <button id="startBtn" disabled>Start Session</button>
           <button id="stopBtn" disabled>Stop Session</button>
         </div>
 
         <div class="section">
-          <strong>Manual Safe Events (no typedText/raw keys ever):</strong><br>
+          <strong>Dev Tools: Manual Safe Events (validation only - main flow is automatic app/window polling):</strong><br>
           <button id="appBtn" disabled>App Changed</button>
           <button id="winBtn" disabled>Window Changed</button>
           <button id="clickBtn" disabled>Mouse Clicked</button>
@@ -82,7 +122,7 @@ function createWindow() {
         <div id="error" style="color:#f87171"></div>
 
         <p style="margin-top:12px;font-size:11px;opacity:0.7">
-          Manual only. Visible controls. Safe events only. Token in memory. X-Client-Id: acme.
+          RECORDING: Capturing active app/window changes only (polls every 1s, sends APP_CHANGED or WINDOW_CHANGED on change only). No screenshots/keys/text/passwords/clipboard. Visible user-controlled. Token in memory. X-Client-Id: acme.
         </p>
 
         <script>
@@ -196,6 +236,7 @@ function createWindow() {
               await apiCall('POST', '/agent/sessions/' + currentSessionId + '/start');
               isRecording = true;
               updateUI();
+              window.flowmind.startRecording(currentSessionId);
             } catch (e) {}
           };
 
@@ -205,6 +246,7 @@ function createWindow() {
               await apiCall('POST', '/agent/sessions/' + currentSessionId + '/stop');
               isRecording = false;
               updateUI();
+              window.flowmind.stopRecording();
             } catch (e) {}
           };
 
@@ -288,9 +330,27 @@ function createWindow() {
             // In real Electron: require('electron').shell.openExternal(url);
           };
 
+          window.flowmind.onActiveWindowChanged((data: any) => {
+            if (isRecording && currentSessionId) {
+              const eventObj = {
+                sequenceNo: eventCount + 1,
+                eventType: data.eventType,
+                timestamp: data.timestamp,
+                appName: data.appName,
+                windowTitle: data.windowTitle
+              };
+              // update last captured UI
+              const lastCap = document.getElementById('lastCaptured');
+              if (lastCap) lastCap.textContent = data.appName + ' - ' + data.windowTitle;
+              sendEvent(eventObj);
+            }
+          });
+
           // Init
           updateUI();
           setInterval(updateUI, 1000); // simple refresh
+
+          // No auto; user-controlled via visible buttons. Polling starts only on explicit Start + window.flowmind.startRecording. Dev tools manual buttons available during recording.
         </script>
       </body>
     </html>
@@ -316,3 +376,45 @@ app.on('window-all-closed', () => {
 
 // IPC stubs for renderer -> main secure token storage etc.
 ipcMain.handle('get-token', async () => null);
+
+ipcMain.on('start-recording', (event, sessionId: string) => {
+  if (recordingInterval) clearInterval(recordingInterval);
+  lastApp = '';
+  lastTitle = '';
+  recordingInterval = setInterval(async () => {
+    try {
+      const win = await getActiveWindowInfo();
+      if (!win) return;
+      const appName = (win.owner && win.owner.name) || 'Unknown';
+      const windowTitle = win.title || '';
+      const timestamp = new Date().toISOString();
+      let eventType = '';
+      if (appName !== lastApp) {
+        eventType = 'APP_CHANGED';
+        lastApp = appName;
+        lastTitle = windowTitle;
+      } else if (windowTitle !== lastTitle) {
+        eventType = 'WINDOW_CHANGED';
+        lastTitle = windowTitle;
+      }
+      if (eventType && mainWindow) {
+        mainWindow.webContents.send('active-window-changed', {
+          eventType,
+          timestamp,
+          appName,
+          windowTitle,
+          url: (win as any).url || undefined
+        });
+      }
+    } catch (err) {
+      console.error('getActiveWindowInfo error:', err);
+    }
+  }, 1000);
+});
+
+ipcMain.on('stop-recording', () => {
+  if (recordingInterval) {
+    clearInterval(recordingInterval);
+    recordingInterval = null;
+  }
+});
