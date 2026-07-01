@@ -9,7 +9,6 @@ import { PrismaModule } from '../../common/prisma/prisma.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     ClientResolverModule,
     JwtModule.registerAsync({

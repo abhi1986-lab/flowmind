@@ -146,7 +146,7 @@ Per development order: next would be safe keyboard/mouse category signals (still
 
 ## Verdict
 
-**Real Desktop App/Window Capture v0: PASSED** (with documented macOS permission note for native title capture; full end-to-end from desktop capture strategy → events in client DB → SOP generated from real app/window context → isolation proven. All scope items delivered, no overbuild.)
+**Real Desktop App/Window Capture v0: INVALID (tag pushed too early; see this validation for real flow fix)** (with documented macOS permission note for native title capture; full end-to-end from desktop capture strategy → events in client DB → SOP generated from real app/window context → isolation proven. All scope items delivered, no overbuild.)
 
 ## What was deliberately deferred (B in report)
 

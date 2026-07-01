@@ -558,7 +558,7 @@ platform_audit_logs
 ```
 (Exactly as required: no sessions/events/workflows/sop_documents table or data in control.)
 
-### I. Final status: Real Desktop App/Window Capture v0 **PASSED**
+### I. Final status: Real Desktop App/Window Capture v0 validation (see current run for real flow fix - previous claims invalid)**
 
 (Platform permission note documented for active-win titles on macOS; fallback + full end-to-end SOP generation from captured context + proofs all completed. Scope not exceeded.)
 
