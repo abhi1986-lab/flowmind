@@ -119,7 +119,7 @@ function createWindow() {
         </div>
 
         <div>Last API response: <div id="lastResponse" class="log">-</div></div>
-        <div id="error" style="color:#f87171"></div>
+        <div id="error" style="color:#f87171; min-height: 1em; font-weight: bold; background: #3f1f1f; padding: 4px; border-radius: 3px;"></div>
 
         <p style="margin-top:12px;font-size:11px;opacity:0.7">
           RECORDING: Capturing active app/window changes only (polls every 1s, sends APP_CHANGED or WINDOW_CHANGED on change only). No screenshots/keys/text/passwords/clipboard. Visible user-controlled. Token in memory. X-Client-Id: acme.
@@ -189,55 +189,71 @@ function createWindow() {
           }
 
           async function apiCall(method, path, body = null) {
-            const headers = {
-              'Content-Type': 'application/json',
-              'X-Client-Id': CLIENT_ID
-            };
-            if (token) headers['Authorization'] = 'Bearer ' + token;
-            const opts = { method, headers };
-            if (body) opts.body = JSON.stringify(body);
             try {
-              const res = await fetch(API + path, opts);
-              const data = await res.json().catch(() => ({}));
-              if (!res.ok) throw new Error(data.message || 'HTTP ' + res.status);
+              if (!window.flowmind || typeof window.flowmind.apiRequest !== 'function') {
+                showError('API bridge not available (preload not loaded?)');
+                throw new Error('API bridge not available');
+              }
+              const result = await window.flowmind.apiRequest(method, path, body, token);
+              if (result && result.error) {
+                showError(result.error);
+                throw new Error(result.error);
+              }
+              const data = result || {};
               showResponse(data);
               return data;
             } catch (e) {
-              showError(e.message);
+              showError((e && e.message) || 'Request failed');
               throw e;
             }
           }
 
           loginBtn.onclick = async () => {
+            showResponse({message: 'Login clicked - calling API...'});
             try {
               const data = await apiCall('POST', '/auth/login', {
                 email: 'contributor@acme.test',
                 password: 'demo123'
               });
-              token = data.accessToken;
-              updateUI();
-              showResponse({message: 'Login success, token in memory'});
-            } catch (e) {}
+              if (data && data.accessToken) {
+                token = data.accessToken;
+                updateUI();
+                showResponse({message: 'Login success! Token set. UI should update.'});
+              } else {
+                showError('Login response had no accessToken: ' + JSON.stringify(data));
+              }
+            } catch (e) {
+              const msg = (e && e.message) ? e.message : (e ? String(e) : 'unknown error');
+              showError('Login error: ' + msg);
+            }
           };
 
           createBtn.onclick = async () => {
+            showResponse({message: 'Creating session...'});
             try {
               const data = await apiCall('POST', '/agent/sessions', {});
               currentSessionId = data.sessionId;
               isRecording = false;
               eventCount = 0;
               updateUI();
-            } catch (e) {}
+              showResponse({message: 'Session created: ' + currentSessionId});
+            } catch (e) {
+              showError('Create session failed: ' + ((e && e.message) || e));
+            }
           };
 
           startBtn.onclick = async () => {
             if (!currentSessionId) return;
+            showResponse({message: 'Starting session...'});
             try {
               await apiCall('POST', '/agent/sessions/' + currentSessionId + '/start');
               isRecording = true;
               updateUI();
               window.flowmind.startRecording(currentSessionId);
-            } catch (e) {}
+              showResponse({message: 'Recording started. Switch apps now.'});
+            } catch (e) {
+              showError('Start failed: ' + ((e && e.message) || e));
+            }
           };
 
           stopBtn.onclick = async () => {
@@ -330,7 +346,7 @@ function createWindow() {
             // In real Electron: require('electron').shell.openExternal(url);
           };
 
-          window.flowmind.onActiveWindowChanged((data: any) => {
+          window.flowmind.onActiveWindowChanged((data) => {
             if (isRecording && currentSessionId) {
               const eventObj = {
                 sequenceNo: eventCount + 1,
@@ -376,6 +392,31 @@ app.on('window-all-closed', () => {
 
 // IPC stubs for renderer -> main secure token storage etc.
 ipcMain.handle('get-token', async () => null);
+
+ipcMain.handle('api-request', async (event, {method, path, body, authToken}) => {
+  console.log('[main] api-request received:', method, path, 'hasToken:', !!authToken);
+  const API = 'http://localhost:4000';
+  const headers: any = {
+    'Content-Type': 'application/json',
+    'X-Client-Id': 'acme'
+  };
+  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+  const opts: any = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  try {
+    const res = await fetch(API + path, opts);
+    const data: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.log('[main] api-request error response:', data);
+      return { error: data.message || 'HTTP ' + res.status };
+    }
+    console.log('[main] api-request success for', path, 'data has accessToken:', !!data.accessToken);
+    return data;
+  } catch (e: any) {
+    console.log('[main] api-request network error:', e.message);
+    return { error: e.message || 'Network error' };
+  }
+});
 
 ipcMain.on('start-recording', (event, sessionId: string) => {
   if (recordingInterval) clearInterval(recordingInterval);

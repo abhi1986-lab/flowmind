@@ -1,7 +1,16 @@
-// Electron preload (context isolation). Expose safe APIs to renderer here in real impl.
-// For MVP shell we use data: URL so this is placeholder.
-import { contextBridge } from 'electron';
+// Electron preload (context isolation). Expose safe APIs to renderer here.
+import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('flowmind', {
-  // Future: secure token get/set, startCapture etc.
+  onActiveWindowChanged: (callback: (data: any) => void) => {
+    ipcRenderer.on('active-window-changed', (event, data) => callback(data));
+  },
+  startRecording: (sessionId: string) => {
+    ipcRenderer.send('start-recording', sessionId);
+  },
+  stopRecording: () => {
+    ipcRenderer.send('stop-recording');
+  },
+  apiRequest: (method: string, path: string, body: any = null, authToken: string | null = null) =>
+    ipcRenderer.invoke('api-request', { method, path, body, authToken })
 });

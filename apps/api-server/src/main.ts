@@ -23,12 +23,15 @@ async function bootstrap() {
   app.use(RequestIdMiddleware);
 
   // Dev CORS (desktop + next.js dashboard)
+  // Allow broader origins for desktop renderer (data: URLs send Origin: null) and dev
   app.enableCors({
-    origin: [
-      'http://localhost:3000',
-      'http://127.0.0.1:3000',
-      'http://localhost:5173', // potential vite/electron dev
-    ],
+    origin: (origin, callback) => {
+      if (process.env.ALLOW_DEV_CLIENT_HEADER === 'true' || !origin || origin.includes('localhost') || origin === 'null' || origin === undefined) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: [
