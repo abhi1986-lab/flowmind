@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Req, UseGuards, Inject } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  UseGuards,
+  Inject,
+} from '@nestjs/common';
 import { IsString, IsOptional } from 'class-validator';
 import type { AuthenticatedRequest } from '../client-resolver/client-resolver.guard';
 import { AuthService } from './auth.service';
