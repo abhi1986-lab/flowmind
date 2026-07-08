@@ -26,7 +26,13 @@ async function bootstrap() {
   // Allow broader origins for desktop renderer (data: URLs send Origin: null) and dev
   app.enableCors({
     origin: (origin, callback) => {
-      if (process.env.ALLOW_DEV_CLIENT_HEADER === 'true' || !origin || origin.includes('localhost') || origin === 'null' || origin === undefined) {
+      if (
+        process.env.ALLOW_DEV_CLIENT_HEADER === 'true' ||
+        !origin ||
+        origin.includes('localhost') ||
+        origin === 'null' ||
+        origin === undefined
+      ) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));

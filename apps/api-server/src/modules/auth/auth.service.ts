@@ -2,13 +2,13 @@ import { Injectable, UnauthorizedException, Inject } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ClientResolverService } from '../client-resolver/client-resolver.service';
 import { JwtPayload, Role, PERMISSIONS } from '@flowmind/shared-types';
-import { Request } from 'express';
 
 @Injectable()
 export class AuthService {
   constructor(
     @Inject(JwtService) private readonly jwtService: JwtService,
-    @Inject(ClientResolverService) private readonly clientResolver: ClientResolverService,
+    @Inject(ClientResolverService)
+    private readonly clientResolver: ClientResolverService,
   ) {}
 
   /**
@@ -69,7 +69,12 @@ export class AuthService {
     const resolved = {
       clientId: 'd7a3ea06-a17c-4190-864c-4a7259c92e20',
       slug: clientSlug,
-      route: { dbConnectionRef: '', s3BucketRef: '', vectorNamespace: '', aiConfigRef: '' },
+      route: {
+        dbConnectionRef: '',
+        s3BucketRef: '',
+        vectorNamespace: '',
+        aiConfigRef: '',
+      },
     };
 
     const permissions = PERMISSIONS[demo.role] || [];

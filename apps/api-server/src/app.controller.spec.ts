@@ -15,8 +15,13 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
-    it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
+    it('should return API metadata', () => {
+      expect(appController.getHello()).toEqual({
+        name: 'FlowMind AI API',
+        description: 'Operational Workflow Intelligence Platform (consent-based)',
+        version: '0.1.0-mvp',
+        constraints: 'See root README.md and docs-pack for non-negotiable rules.',
+      });
     });
   });
 });
