@@ -11,7 +11,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/apps/api-server/src/main.js",
+    "start:prod": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\" --ignore-pattern \"**/*.spec.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -20,6 +20,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@flowmind/ai-providers": "*",
     "@flowmind/shared-types": "*",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",

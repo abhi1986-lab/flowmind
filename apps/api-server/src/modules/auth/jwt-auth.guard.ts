@@ -4,15 +4,15 @@ import {
   ExecutionContext,
   UnauthorizedException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import type { AuthenticatedRequest } from '../client-resolver/client-resolver.guard';
 import type { JwtPayload } from '@flowmind/shared-types';
 
+// Use jsonwebtoken directly to avoid Nest JwtService DI issues when running via tsx in this monorepo setup.
+import * as jwt from 'jsonwebtoken';
+
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly jwtService: JwtService) {}
-
-  async canActivate(context: ExecutionContext): Promise<boolean> {
+  canActivate(context: ExecutionContext): boolean {
     const req = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const authHeader = req.headers.authorization;
 
@@ -25,11 +25,11 @@ export class JwtAuthGuard implements CanActivate {
     const token = authHeader.substring(7);
 
     try {
-      const payload = await this.jwtService.verifyAsync<JwtPayload>(token);
-      // Attach for ClientResolverGuard and controllers
+      const payload = jwt.verify(token, 'dev-super-secret-change-in-real-env') as JwtPayload;
       req.user = payload;
       return true;
-    } catch {
+    } catch (err) {
+      console.error('[JwtAuthGuard] verify failed:', (err as Error)?.message || err);
       throw new UnauthorizedException('Invalid or expired token');
     }
   }

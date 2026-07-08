@@ -51,7 +51,24 @@ export class ClientResolverGuard implements CanActivate {
     }
 
     // Resolve the client the request is trying to reach
-    const resolved = await this.clientResolver.resolveFromRequest(req);
+    let clientResolver = this.clientResolver;
+    let prismaFactory = this.clientPrismaFactory;
+    if (!clientResolver || !prismaFactory) {
+      // Runtime fallback for tsx direct run (DI not fully wired in some setups)
+      // @ts-ignore
+      const resolverMod = require('./client-resolver.service');
+      // @ts-ignore
+      const prismaMod = require('../../common/prisma/client-prisma.factory');
+      // @ts-ignore
+      const controlMod = require('../../common/prisma/control-prisma.service');
+      const ControlPrismaService = controlMod.ControlPrismaService;
+      const ClientResolverService = resolverMod.ClientResolverService;
+      const ClientPrismaFactory = prismaMod.ClientPrismaFactory;
+      const controlPrisma = new ControlPrismaService();
+      clientResolver = new ClientResolverService(controlPrisma);
+      prismaFactory = new ClientPrismaFactory();
+    }
+    const resolved = await clientResolver.resolveFromRequest(req);
 
     // THE CRITICAL CHECK - non-negotiable per constraints
     if (
@@ -65,7 +82,7 @@ export class ClientResolverGuard implements CanActivate {
     }
 
     // Build and attach the scope (this is what all business logic uses)
-    const scope = this.clientResolver.buildAccessScope({
+    const scope = clientResolver.buildAccessScope({
       actorUserId: user.sub,
       clientId: resolved.clientId,
       slug: resolved.slug,
@@ -75,7 +92,7 @@ export class ClientResolverGuard implements CanActivate {
     });
 
     // Attach client data plane PrismaClient (key for Client Data Plane isolation + Session/Event backbone)
-    req.clientPrisma = this.clientPrismaFactory.getPrismaClient(
+    req.clientPrisma = prismaFactory.getPrismaClient(
       resolved.route.dbConnectionRef,
     );
     req.accessScope = scope;

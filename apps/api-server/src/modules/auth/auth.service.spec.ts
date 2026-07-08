@@ -9,20 +9,20 @@ describe('AuthService', () => {
   let service: AuthService;
   let jwtService: JwtService;
 
+  const mockJwtService = {
+    signAsync: jest.fn().mockResolvedValue('mock.jwt.token'),
+  };
+
+  const mockClientResolver = {
+    // not heavily used in current demo login
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
-        {
-          provide: JwtService,
-          useValue: {
-            signAsync: jest.fn().mockResolvedValue('mock-token'),
-          },
-        },
-        {
-          provide: ClientResolverService,
-          useValue: {},
-        },
+        { provide: JwtService, useValue: mockJwtService },
+        { provide: ClientResolverService, useValue: mockClientResolver },
       ],
     }).compile();
 
@@ -47,6 +47,19 @@ describe('AuthService', () => {
       expect(jwtService.signAsync).toHaveBeenCalled();
     });
 
+    it('should login with valid contributor credentials', async () => {
+      const result = await service.login('contributor@acme.test', 'demo123');
+      expect(result.accessToken).toBe('mock.jwt.token');
+      expect(result.user.email).toBe('contributor@acme.test');
+      expect(result.user.role).toBe('CONTRIBUTOR');
+      expect(result.user.clientId).toBeDefined();
+    });
+
+    it('should login with valid platform admin', async () => {
+      const result = await service.login('platform@flowmind.internal', 'ChangeMe123!');
+      expect(result.user.role).toBe('CLIENT_ADMIN');
+    });
+
     it('should throw UnauthorizedException for invalid credentials', async () => {
       await expect(service.login('admin@acme.test', 'wrong-password')).rejects.toThrow(
         UnauthorizedException,
@@ -57,6 +70,24 @@ describe('AuthService', () => {
       await expect(service.login('nonexistent@test.com', 'demo123')).rejects.toThrow(
         UnauthorizedException,
       );
+    });
+
+    it('should throw UnauthorizedException for invalid password', async () => {
+      await expect(
+        service.login('contributor@acme.test', 'wrongpassword')
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should throw UnauthorizedException for unknown user', async () => {
+      await expect(
+        service.login('unknown@user.com', 'demo123')
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should include permissions in the response', async () => {
+      const result = await service.login('admin@acme.test', 'demo123');
+      expect(result.user.permissions).toBeDefined();
+      expect(Array.isArray(result.user.permissions)).toBe(true);
     });
   });
 

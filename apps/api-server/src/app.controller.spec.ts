@@ -24,4 +24,13 @@ describe('AppController', () => {
       });
     });
   });
+
+  describe('health', () => {
+    it('should return health status', () => {
+      const result = appController.health();
+      expect(result.status).toBe('ok');
+      expect(result.service).toBe('flowmind-api');
+      expect(result).toHaveProperty('timestamp');
+    });
+  });
 });

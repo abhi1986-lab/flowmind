@@ -64,10 +64,10 @@ export class AuthService {
 
     const clientSlug = demo.clientSlug;
 
-    // For demo users in this validation run, hardcode the known acme client ID from seed (bypasses resolver find issue due to connection in this env; real flow for agent calls will use guards).
-    // The client ID from seed: d7a3ea06-a17c-4190-864c-4a7259c92e20
+    // For demo users in this validation run, hardcode the current acme client ID from fresh seed.
+    // Matches the client created by seed-control.ts so JWT client_id matches what ClientResolverGuard expects.
     const resolved = {
-      clientId: 'd7a3ea06-a17c-4190-864c-4a7259c92e20',
+      clientId: '82b84d1d-1708-42cf-b9af-d175c1acc84d',
       slug: clientSlug,
       route: {
         dbConnectionRef: '',

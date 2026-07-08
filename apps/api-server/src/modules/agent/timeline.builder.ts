@@ -37,16 +37,41 @@ export class TimelineBuilder {
       const app = ev.appName || 'Unknown App';
       const win = ev.windowTitle || 'Unknown Window';
 
+      const url = (ev as any).metadata?.url || (ev as any).url;
+      const focused = (ev as any).metadata?.focusedElement || (ev as any).focusedName || (ev as any).focusedElement;
+      const doc = (ev as any).metadata?.document || (ev as any).document;
+
       if (
         ev.eventType === 'APP_CHANGED' ||
         ev.eventType === 'WINDOW_CHANGED' ||
+        ev.eventType === 'URL_CHANGED' ||
+        ev.eventType === 'FOCUS_CHANGED' ||
         app !== lastApp ||
         win !== lastWindow
       ) {
+        let description = `Switched to ${app} window: ${win}`;
+        if (url) {
+          if (ev.eventType === 'URL_CHANGED') {
+            description = `Navigated in ${app} to: ${url}`;
+          } else {
+            description += ` (URL: ${url})`;
+          }
+        }
+        if (focused) {
+          description += ` | Focused: ${focused}`;
+        }
+        if (doc) {
+          description += ` | Document: ${doc}`;
+        }
+
+        let title = `${app} - ${win}`;
+        if (focused) title += ` [${focused}]`;
+        if (doc) title += ` (${doc})`;
+
         steps.push({
           stepNo: currentStepNo++,
-          title: `${app} - ${win}`,
-          description: `Switched to ${app} window: ${win}`,
+          title,
+          description,
           eventRefs: [ev.id],
         });
         lastApp = app;

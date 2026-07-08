@@ -17,7 +17,7 @@
     "db:control:migrate": "cd apps/api-server && npx prisma migrate deploy || echo 'Run after DBs are up, or use migrate dev'",
     "db:control:generate": "cd apps/api-server && npx prisma generate",
     "seed:control": "cd apps/api-server && npx tsx scripts/seed-control.ts",
-    "api:dev": "cd apps/api-server && npm run build && ALLOW_DEV_CLIENT_HEADER=true node dist/apps/api-server/src/main.js",
+    "api:dev": "cd apps/api-server && npm run build && ALLOW_DEV_CLIENT_HEADER=true node dist/main.js",
     "typecheck": "npm run typecheck --workspaces --if-present || npx tsc -p apps/api-server/tsconfig.json --noEmit"
   },
   "devDependencies": {

@@ -136,6 +136,11 @@ services:
       JWT_EXPIRES_IN: 7d
       # For local dev only: allow header-based client override when host is not subdomain
       ALLOW_DEV_CLIENT_HEADER: "true"
+      # AI provider config (for SOP auto-polish). Switch via AI_PROVIDER in seed or direct DB update to client_routes.ai_config_ref
+      # AI_PROVIDER: grok
+      # XAI_API_KEY: ${XAI_API_KEY:-}
+      # OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # AI_MODEL: grok-beta
     ports:
       - "4000:4000"
     volumes:

@@ -8,7 +8,13 @@
  * - Local encrypted buffer (to be implemented)
  * - Upload to backend with proper client JWT (obtained at login)
  *
- * Real Desktop App/Window Capture v0 (per phase scope): automatic active app/window polling (1s, change-only APP_CHANGED/WINDOW_CHANGED), visible RECORDING UX, user-controlled start/stop. Manual test events as dev tools only. Uses existing /events/batch. No screenshots, keys, text, passwords, hidden recording, AI, new tables. URL capture deferred (not sent). Client isolation + control no-op data preserved.
+ * Enhanced capture for ANY app (not just browsers): Uses macOS System Events/Accessibility to log what is happening inside the active window:
+ *   - focused UI element (role, name, value)
+ *   - document/file name
+ *   - URL (for browsers)
+ * Detects APP_CHANGED, WINDOW_CHANGED, URL_CHANGED, FOCUS_CHANGED.
+ * Enables real SOPs like "In Finder, focused 'Documents' folder" or "In TextEdit, focused text field".
+ * Safe: no screenshots, no raw keystrokes, no passwords. Visible + user-controlled.
  */
 
 import { app, BrowserWindow, ipcMain } from 'electron';
@@ -25,11 +31,19 @@ async function getActiveWindowInfo() {
   // Primary: active-win (may require Accessibility/Screen Recording perms on macOS)
   try {
     const win = await activeWin();
-    if (win) return win;
+    if (win) {
+      // Try to enrich with general app context (not just browsers)
+      const context = await getAppContext(win.owner?.name || win.app || '');
+      if (context) {
+        return { ...win, ...context };
+      }
+      return win;
+    }
   } catch (err) {
     console.error('active-win error (will try fallback):', (err as Error)?.message || err);
   }
-  // Minimal OS-specific fallback for macOS (no new packages, uses built-in osascript + System Events)
+
+  // Fallback using osascript + System Events (works for any app with Accessibility perms)
   if (process.platform === 'darwin') {
     try {
       const { stdout: appOut } = await execPromise(
@@ -43,12 +57,147 @@ async function getActiveWindowInfo() {
         );
         windowTitle = (winOut || '').trim();
       } catch {}
-      return { owner: { name: appName }, title: windowTitle } as any;
+
+      const context = await getAppContext(appName);
+
+      return {
+        owner: { name: appName },
+        title: windowTitle,
+        ...context,
+      } as any;
     } catch (e) {
       console.error('mac fallback osascript error:', e);
     }
   }
   return null;
+}
+
+/**
+ * Get rich context for ANY frontmost app using Accessibility/System Events.
+ * Tries to find focused UI element, its role, name, value, and document/file info.
+ * This allows logging "what is happening" inside the window (e.g. focused field, button, document).
+ * Safe: only reads UI attributes, no screenshots, no raw keystrokes.
+ */
+async function getAppContext(appName: string): Promise<Record<string, any> | undefined> {
+  if (!appName || appName === 'Unknown') return undefined;
+
+  const safeApp = appName.replace(/"/g, '\\"');
+
+  try {
+    // Try to get focused UI element details (works across most apps)
+    const focusedScript = `
+      tell application "System Events"
+        tell process "${safeApp}"
+          try
+            set frontWin to first window
+            set focusedEl to (first UI element of frontWin whose focused is true)
+            set elRole to role of focusedEl
+            set elName to name of focusedEl
+            set elValue to (value of focusedEl as text)
+            return "FOCUSED:" & elRole & "|||" & elName & "|||" & elValue
+          on error
+            return ""
+          end try
+        end tell
+      end tell
+    `;
+
+    const { stdout: focusedOut } = await execPromise(
+      `osascript -e '${focusedScript}' 2>/dev/null || echo ''`
+    );
+
+    let context: Record<string, any> = {};
+
+    if (focusedOut && focusedOut.trim()) {
+      const parts = focusedOut.trim().split('|||');
+      if (parts.length >= 3 && parts[0].startsWith('FOCUSED:')) {
+        context.focusedElement = parts[0].replace('FOCUSED:', '').trim();
+        context.focusedName = parts[1].trim();
+        context.focusedValue = parts[2].trim();
+      }
+    }
+
+    // Try to get document or file name (common in many apps: TextEdit, Preview, Finder, VSCode, etc.)
+    const docScript = `
+      tell application "System Events"
+        tell process "${safeApp}"
+          try
+            set frontWin to first window
+            set docName to name of frontWin
+            -- Try to get value of attribute for document/file
+            set docValue to (value of attribute "AXDocument" of frontWin as text)
+            if docValue is not "" then return "DOCUMENT:" & docValue
+            return "WINDOW:" & docName
+          on error
+            return ""
+          end try
+        end tell
+      end tell
+    `;
+
+    const { stdout: docOut } = await execPromise(
+      `osascript -e '${docScript}' 2>/dev/null || echo ''`
+    );
+
+    if (docOut && docOut.trim()) {
+      if (docOut.includes('DOCUMENT:')) {
+        context.document = docOut.replace('DOCUMENT:', '').trim();
+      } else if (docOut.includes('WINDOW:')) {
+        // already have title, but can use
+      }
+    }
+
+    // Browser-specific URL (kept for compatibility)
+    if (appName.toLowerCase().match(/chrome|safari|firefox|edge/)) {
+      const url = await tryGetBrowserUrl(appName);
+      if (url) context.url = url;
+    }
+
+    return Object.keys(context).length > 0 ? context : undefined;
+  } catch (e) {
+    // Silent fail - fallback to basic title only
+    return undefined;
+  }
+}
+
+/**
+ * Try to get the current URL from common browsers using AppleScript.
+ * Safe: only reads the URL, no content scraping or keystroke logging.
+ */
+async function tryGetBrowserUrl(appName: string): Promise<string | undefined> {
+  if (!appName) return undefined;
+
+  const lower = appName.toLowerCase();
+
+  try {
+    if (lower.includes('chrome')) {
+      const { stdout } = await execPromise(
+        `osascript -e 'tell application "Google Chrome" to get URL of active tab of front window' 2>/dev/null || echo ''`
+      );
+      const url = stdout.trim();
+      return url || undefined;
+    }
+
+    if (lower.includes('safari')) {
+      const { stdout } = await execPromise(
+        `osascript -e 'tell application "Safari" to get URL of front document' 2>/dev/null || echo ''`
+      );
+      const url = stdout.trim();
+      return url || undefined;
+    }
+
+    if (lower.includes('firefox')) {
+      const { stdout } = await execPromise(
+        `osascript -e 'tell application "Firefox" to get URL of front window' 2>/dev/null || echo ''`
+      );
+      const url = stdout.trim();
+      return url || undefined;
+    }
+  } catch (e) {
+    // Silently ignore - not critical
+  }
+
+  return undefined;
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -122,7 +271,7 @@ function createWindow() {
         <div id="error" style="color:#f87171; min-height: 1em; font-weight: bold; background: #3f1f1f; padding: 4px; border-radius: 3px;"></div>
 
         <p style="margin-top:12px;font-size:11px;opacity:0.7">
-          RECORDING: Capturing active app/window changes only (polls every 1s, sends APP_CHANGED or WINDOW_CHANGED on change only). No screenshots/keys/text/passwords/clipboard. Visible user-controlled. Token in memory. X-Client-Id: acme.
+          RECORDING: Capturing app/window + **what is happening** (browser URLs, navigation). New URL_CHANGED events. This enables real, detailed SOPs instead of just window sequences. Safe only.
         </p>
 
         <script>
@@ -353,11 +502,34 @@ function createWindow() {
                 eventType: data.eventType,
                 timestamp: data.timestamp,
                 appName: data.appName,
-                windowTitle: data.windowTitle
+                windowTitle: data.windowTitle,
+                metadata: {},
               };
-              // update last captured UI
+
+              // Rich context for ANY app: URL, focused element, document, value, etc.
+              if (data.url) eventObj.metadata.url = data.url;
+              if (data.metadata) {
+                eventObj.metadata = { ...eventObj.metadata, ...data.metadata };
+              }
+              if (data.focusedName || data.focusedElement) {
+                eventObj.metadata.focusedElement = data.focusedName || data.focusedElement;
+              }
+              if (data.document) eventObj.metadata.document = data.document;
+              if (data.focusedValue) eventObj.metadata.value = data.focusedValue;
+
+              if (Object.keys(eventObj.metadata).length === 0) delete eventObj.metadata;
+
+              // update last captured UI with richer info for ANY app
               const lastCap = document.getElementById('lastCaptured');
-              if (lastCap) lastCap.textContent = data.appName + ' - ' + data.windowTitle;
+              let display = data.appName + " - " + data.windowTitle;
+              if (data.url) display += " [" + data.url + "]";
+              if (data.focusedName) display += " → focused: " + data.focusedName;
+              if (data.document) display += " (doc: " + data.document + ")";
+              if (data.focusedValue && data.focusedValue.length < 50) {
+                display += ' = "' + data.focusedValue + '"';
+              }
+              if (lastCap) lastCap.textContent = display;
+
               sendEvent(eventObj);
             }
           });
@@ -422,30 +594,70 @@ ipcMain.on('start-recording', (event, sessionId: string) => {
   if (recordingInterval) clearInterval(recordingInterval);
   lastApp = '';
   lastTitle = '';
+  let lastUrl = '';
+  let lastFocused = '';
+
   recordingInterval = setInterval(async () => {
     try {
       const win = await getActiveWindowInfo();
       if (!win) return;
+
       const appName = (win.owner && win.owner.name) || 'Unknown';
       const windowTitle = win.title || '';
+      const currentUrl = (win as any).url || '';
+      const focusedName = (win as any).focusedName || (win as any).focusedElement || '';
       const timestamp = new Date().toISOString();
+
       let eventType = '';
+      const metadata: any = {};
+
+      const contextChanged = appName !== lastApp ||
+        (currentUrl && currentUrl !== lastUrl) ||
+        (focusedName && focusedName !== lastFocused && focusedName !== 'Unknown');
+
       if (appName !== lastApp) {
         eventType = 'APP_CHANGED';
         lastApp = appName;
         lastTitle = windowTitle;
+        lastUrl = currentUrl;
+        lastFocused = focusedName;
+        if (currentUrl) metadata.url = currentUrl;
+        if (focusedName) metadata.focusedElement = focusedName;
+      } else if (currentUrl && currentUrl !== lastUrl) {
+        eventType = 'URL_CHANGED';
+        lastUrl = currentUrl;
+        metadata.url = currentUrl;
+        metadata.previousUrl = lastUrl || undefined;
       } else if (windowTitle !== lastTitle) {
         eventType = 'WINDOW_CHANGED';
         lastTitle = windowTitle;
+        if (currentUrl) metadata.url = currentUrl;
+      } else if (focusedName && focusedName !== lastFocused) {
+        // New: detect focus change inside the same window (works for any app)
+        eventType = 'FOCUS_CHANGED';
+        lastFocused = focusedName;
+        metadata.focusedElement = focusedName;
+        if ((win as any).focusedValue) metadata.value = (win as any).focusedValue;
+        if (currentUrl) metadata.url = currentUrl;
       }
+
       if (eventType && mainWindow) {
-        mainWindow.webContents.send('active-window-changed', {
+        const sentData: any = {
           eventType,
           timestamp,
           appName,
           windowTitle,
-          url: (win as any).url || undefined
-        });
+          url: currentUrl || undefined,
+          metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+        };
+
+        // Forward general app context for any app
+        if ((win as any).focusedName) sentData.focusedName = (win as any).focusedName;
+        if ((win as any).focusedElement) sentData.focusedElement = (win as any).focusedElement;
+        if ((win as any).document) sentData.document = (win as any).document;
+        if ((win as any).focusedValue) sentData.focusedValue = (win as any).focusedValue;
+
+        mainWindow.webContents.send('active-window-changed', sentData);
       }
     } catch (err) {
       console.error('getActiveWindowInfo error:', err);

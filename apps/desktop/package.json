@@ -10,6 +10,7 @@
     "package": "echo 'Use electron-builder in later sprint'"
   },
   "dependencies": {
+    "active-win": "^8.2.1",
     "electron": "^31.0.0"
   },
   "devDependencies": {

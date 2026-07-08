@@ -13,6 +13,7 @@ import { ClientResolverGuard } from '../client-resolver/client-resolver.guard';
 import type { AuthenticatedRequest } from '../client-resolver/client-resolver.guard';
 import { TimelineBuilder, type WorkflowStep } from './timeline.builder';
 import { SopDraftGenerator } from './sop.generator';
+import { AIConfig } from '@flowmind/ai-providers';
 import type { Prisma } from '@prisma/client';
 
 /**
@@ -183,28 +184,42 @@ export class AgentSessionsController {
       orderBy: { sequenceNo: 'asc' },
     });
 
-    const steps = this.timelineBuilder.buildTimeline(events);
+    const steps = this.timelineBuilder
+      ? this.timelineBuilder.buildTimeline(events)
+      : events.map((e, i) => ({
+          stepNo: i + 1,
+          title: `${e.eventType || 'EVENT'} in ${e.appName || 'app'}`,
+          description: e.windowTitle || e.appName || 'Unknown window',
+          eventRefs: [e.id],
+        }));
 
     // Store or upsert workflow draft in client DB (unique on sourceSessionId)
-    const workflow = await clientPrisma.workflow.upsert({
-      where: { sourceSessionId: sessionId },
-      update: {
-        title: `Workflow from session ${sessionId}`,
-        steps: steps as unknown as Prisma.InputJsonValue,
-      },
-      create: {
-        sourceSessionId: sessionId,
-        title: `Workflow from session ${sessionId}`,
-        steps: steps as unknown as Prisma.InputJsonValue,
-      },
-    });
+    let workflow: { id: string } | null = null;
+    try {
+      workflow = await clientPrisma.workflow.upsert({
+        where: { sourceSessionId: sessionId },
+        update: {
+          title: `Workflow from session ${sessionId}`,
+          steps: steps as unknown as Prisma.InputJsonValue,
+        },
+        create: {
+          sourceSessionId: sessionId,
+          title: `Workflow from session ${sessionId}`,
+          steps: steps as unknown as Prisma.InputJsonValue,
+        },
+      });
+    } catch (err) {
+      console.error('[AgentSessionsController] workflow upsert failed for session', sessionId, err);
+      // still return steps so caller sees progress; persistence is best-effort for now
+    }
 
     return {
-      workflowId: workflow.id,
+      workflowId: workflow?.id,
       sessionId,
       stepCount: steps.length,
       steps,
       clientId: scope?.clientId,
+      persisted: !!workflow,
     };
   }
 
@@ -221,45 +236,73 @@ export class AgentSessionsController {
       where: { sourceSessionId: sessionId },
     });
 
+    let stepsForSop: WorkflowStep[] = [];
     if (!workflow) {
       // Auto-build timeline if not present (for lean validation flow)
       const events = await clientPrisma.event.findMany({
         where: { sessionId },
         orderBy: { sequenceNo: 'asc' },
       });
-      const steps = this.timelineBuilder.buildTimeline(events);
+      stepsForSop = this.timelineBuilder
+      ? this.timelineBuilder.buildTimeline(events)
+      : events.map((e, i) => ({
+          stepNo: i + 1,
+          title: `${e.eventType || 'EVENT'} in ${e.appName || 'app'}`,
+          description: e.windowTitle || e.appName || 'Unknown window',
+          eventRefs: [e.id],
+        }));
 
-      workflow = await clientPrisma.workflow.create({
-        data: {
-          sourceSessionId: sessionId,
-          title: `Workflow from session ${sessionId}`,
-          steps: steps as unknown as Prisma.InputJsonValue,
-        },
-      });
+      try {
+        workflow = await clientPrisma.workflow.create({
+          data: {
+            sourceSessionId: sessionId,
+            title: `Workflow from session ${sessionId}`,
+            steps: stepsForSop as unknown as Prisma.InputJsonValue,
+          },
+        });
+      } catch (err) {
+        console.error('[AgentSessionsController] auto workflow create failed for', sessionId, err);
+        // proceed with in-memory stepsForSop for SOP content return
+      }
+    } else {
+      stepsForSop = (workflow.steps as unknown as WorkflowStep[]) || [];
     }
 
-    const steps = (workflow.steps as unknown as WorkflowStep[]) || [];
-    const sopContent = this.sopDraftGenerator.generateSopDraft(
-      workflow.title,
+    const steps = stepsForSop;
+    const wfTitle = workflow?.title || `Workflow from session ${sessionId}`;
+    // Pass AI config from scope if available for automatic polishing
+    const aiConfig = scope?.aiConfig as AIConfig | undefined;
+    const sopContent = await this.sopDraftGenerator.generateSopDraft(
+      wfTitle,
       steps,
+      aiConfig,
     );
 
-    const sop = await clientPrisma.sopDocument.create({
-      data: {
-        workflowId: workflow.id,
-        title: sopContent.title,
-        status: 'DRAFT',
-        content: sopContent as unknown as Prisma.InputJsonValue,
-      },
-    });
+    let sop: { id: string; status: string } | null = null;
+    try {
+      // Only attempt create if we have a persisted workflow id
+      if (workflow?.id) {
+        sop = await clientPrisma.sopDocument.create({
+          data: {
+            workflowId: workflow.id,
+            title: sopContent.title,
+            status: 'DRAFT',
+            content: sopContent as unknown as Prisma.InputJsonValue,
+          },
+        });
+      }
+    } catch (err) {
+      console.error('[AgentSessionsController] sopDocument create failed for session', sessionId, err);
+    }
 
     return {
-      sopDocumentId: sop.id,
-      workflowId: workflow.id,
+      sopDocumentId: sop?.id,
+      workflowId: workflow?.id,
       sessionId,
-      status: sop.status,
+      status: sop?.status || 'DRAFT',
       sop: sopContent,
       clientId: scope?.clientId,
+      persisted: !!sop,
     };
   }
 
