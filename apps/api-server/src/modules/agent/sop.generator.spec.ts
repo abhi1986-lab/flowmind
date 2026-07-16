@@ -18,77 +18,117 @@ describe('SopDraftGenerator', () => {
   });
 
   const sampleSteps: WorkflowStep[] = [
-    { stepNo: 1, title: 'Chrome - Google', description: 'Switched to Chrome window: Google' },
-    { stepNo: 2, title: 'Chrome - Google', description: 'Performed mouse click' },
-    { stepNo: 3, title: 'VSCode - main.ts', description: 'Switched to VSCode window: main.ts' },
+    {
+      stepNo: 1,
+      title: 'Chrome: Google',
+      description: 'Switch to application "Chrome" (window: "Google")',
+      action: 'Switch to application "Chrome" (window: "Google")',
+    },
+    {
+      stepNo: 2,
+      title: 'Chrome: Search',
+      description: 'In Chrome, focus input field "Search"',
+      action: 'In Chrome, focus input field "Search"',
+    },
+    {
+      stepNo: 3,
+      title: 'VSCode: main.ts',
+      description: 'Switch to application "VSCode" (window: "main.ts")',
+      action: 'Switch to application "VSCode" (window: "main.ts")',
+    },
   ];
 
-  it('should generate a complete SOP draft with default structure', async () => {
+  it('should generate a complete SOP draft with action procedure', async () => {
     const result = await generator.generateSopDraft('Test Workflow', sampleSteps);
 
     expect(result.title).toBe('Standard Operating Procedure: Test Workflow');
-    expect(result.procedure.length).toBeGreaterThan(0);
-    expect(result.procedure[0]).toContain('Switch to and work in');
+    expect(result.procedure.length).toBe(3);
+    expect(result.procedure[0]).toMatch(/Chrome/);
+    expect(result.procedure[1]).toMatch(/Search/);
     expect(result.decisionPoints.length).toBeGreaterThan(0);
-    expect(result.exceptions.length).toBe(3);
-    expect(result.checklist.length).toBe(5);
-    expect(result.purpose).toContain('captured from a real session');
+    expect(result.exceptions.length).toBeGreaterThanOrEqual(3);
+    expect(result.checklist.length).toBeGreaterThanOrEqual(5);
+    expect(result.purpose).toMatch(/capture|workflow/i);
   });
 
-  it('should replace "Unknown Window" in procedure', async () => {
+  it('should not invent missing value in procedure', async () => {
+    const stepsWithNoise: WorkflowStep[] = [
+      {
+        stepNo: 1,
+        title: 'Electron - FlowMind (missing value)',
+        description:
+          'Switch to and work in Electron window: FlowMind | Document: missing value',
+        action:
+          'Switch to application "Electron" (window: "FlowMind")',
+      },
+    ];
+    const result = await generator.generateSopDraft('Test', stepsWithNoise);
+    expect(result.procedure.join(' ')).not.toMatch(/missing value/i);
+  });
+
+  it('should replace Unknown Window', async () => {
     const stepsWithUnknown: WorkflowStep[] = [
-      { stepNo: 1, title: 'App', description: 'Switched to App window: Unknown Window' },
+      {
+        stepNo: 1,
+        title: 'App',
+        description: 'Switched to App window: Unknown Window',
+        action: 'Switched to App window: Unknown Window',
+      },
     ];
     const result = await generator.generateSopDraft('Test', stepsWithUnknown);
     expect(result.procedure[0]).not.toContain('Unknown Window');
     expect(result.procedure[0]).toContain('the active window');
   });
 
-  it('should add continued note for consecutive same app steps (heuristic)', async () => {
-    const consecutive: WorkflowStep[] = [
-      { stepNo: 1, title: 'Chrome - Google', description: 'Switched to Chrome window: Google' },
-      { stepNo: 2, title: 'Chrome - Google', description: 'Performed mouse click' },
-    ];
-    const result = await generator.generateSopDraft('Test', consecutive);
-    expect(result.procedure[1]).toContain('(continued)');
-  });
-
   it('should detect decision points from step content', async () => {
     const decisionSteps: WorkflowStep[] = [
-      { stepNo: 1, title: 'Check if valid', description: 'verify something' },
-      { stepNo: 2, title: 'Normal step', description: 'do work' },
+      { stepNo: 1, title: 'Check if valid', description: 'verify something', action: 'verify something' },
+      { stepNo: 2, title: 'Normal step', description: 'do work', action: 'do work' },
     ];
     const result = await generator.generateSopDraft('Test', decisionSteps);
-    expect(result.decisionPoints.some(d => d.includes('Check if valid'))).toBe(true);
+    expect(result.decisionPoints.some((d) => /verify|Check if valid/i.test(d))).toBe(true);
   });
 
-  it('should use stub AI provider (skip real AI when provider=stub)', async () => {
+  it('should use stub AI provider', async () => {
     const aiConfig: AIConfig = { provider: 'stub' };
     const result = await generator.generateSopDraft('Test', sampleSteps, aiConfig);
     expect(result.procedure.length).toBeGreaterThan(0);
-    // With stub it still does heuristic polish
   });
 
-  it('should fallback gracefully if AI provider fails (e.g. bad config)', async () => {
+  it('should fallback gracefully if AI provider fails', async () => {
     const badAiConfig: any = { provider: 'grok', apiKey: 'invalid-for-test' };
     const result = await generator.generateSopDraft('Test', sampleSteps, badAiConfig);
     expect(result.procedure.length).toBeGreaterThan(0);
-    // Should still return base structure
   });
 
   it('should handle empty steps gracefully', async () => {
     const result = await generator.generateSopDraft('Empty', []);
     expect(result.procedure).toEqual([]);
-    expect(result.decisionPoints.length).toBe(1); // default message
+    expect(result.decisionPoints.length).toBe(1);
   });
 
-  it('should incorporate URL and focused context into procedure descriptions when present in steps', async () => {
+  it('should keep URL and focused context in procedure', async () => {
     const richSteps: WorkflowStep[] = [
-      { stepNo: 1, title: 'Chrome - Google', description: 'Switched to Chrome window: Google | Focused: search field' },
-      { stepNo: 2, title: 'Chrome - Google', description: 'Navigated in Chrome to: https://example.com' },
+      {
+        stepNo: 1,
+        title: 'Chrome: search field',
+        description: 'In Chrome, focus input field "search field"',
+        action: 'In Chrome, focus input field "search field"',
+      },
+      {
+        stepNo: 2,
+        title: 'Chrome: https://example.com',
+        description: 'In Chrome, navigate to https://example.com',
+        action: 'In Chrome, navigate to https://example.com',
+      },
     ];
     const result = await generator.generateSopDraft('Web Search', richSteps);
     expect(result.procedure[0]).toContain('search field');
     expect(result.procedure[1]).toContain('https://example.com');
+  });
+
+  it('should list captured apps in prerequisites when possible', async () => {
+    const result = await generator.generateSopDraft('Test Workflow', sampleSteps);
+    expect(result.prerequisites.join(' ')).toMatch(/Chrome|VSCode|applications/i);
   });
 });

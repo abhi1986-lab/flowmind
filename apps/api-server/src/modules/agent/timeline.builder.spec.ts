@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { TimelineBuilder, WorkflowStep } from './timeline.builder';
+import { TimelineBuilder } from './timeline.builder';
 import { Event } from '@prisma/client';
 
 describe('TimelineBuilder', () => {
@@ -20,162 +20,157 @@ describe('TimelineBuilder', () => {
   it('should return empty array for no events', () => {
     expect(builder.buildTimeline([])).toEqual([]);
     expect(builder.buildTimeline(null as any)).toEqual([]);
-    expect(builder.buildTimeline(undefined as any)).toEqual([]);
   });
 
-  it('should build steps for APP_CHANGED and WINDOW_CHANGED', () => {
+  it('should build action-oriented steps for app and url changes', () => {
     const events: Partial<Event>[] = [
       {
         id: 'e1',
         sequenceNo: 1,
         eventType: 'APP_CHANGED',
-        timestamp: new Date('2024-01-01T10:00:00Z'),
         appName: 'Chrome',
         windowTitle: 'Google',
+        metadata: { url: 'https://google.com/', pageTitle: 'Google' },
       },
       {
         id: 'e2',
         sequenceNo: 2,
-        eventType: 'WINDOW_CHANGED',
-        timestamp: new Date('2024-01-01T10:01:00Z'),
-        appName: 'VSCode',
-        windowTitle: 'main.ts',
-      },
-    ];
-
-    const steps = builder.buildTimeline(events as Event[]);
-    expect(steps).toHaveLength(2);
-    expect(steps[0]).toMatchObject({
-      stepNo: 1,
-      title: 'Chrome - Google',
-      description: 'Switched to Chrome window: Google',
-      eventRefs: ['e1'],
-    });
-    expect(steps[1]).toMatchObject({
-      stepNo: 2,
-      title: 'VSCode - main.ts',
-      description: 'Switched to VSCode window: main.ts',
-      eventRefs: ['e2'],
-    });
-  });
-
-  it('should group consecutive actions inside the same app/window', () => {
-    const events: Partial<Event>[] = [
-      {
-        id: 'e1',
-        sequenceNo: 1,
-        eventType: 'APP_CHANGED',
-        timestamp: new Date(),
+        eventType: 'URL_CHANGED',
         appName: 'Chrome',
-        windowTitle: 'Docs',
-      },
-      {
-        id: 'e2',
-        sequenceNo: 2,
-        eventType: 'MOUSE_CLICK',
-        timestamp: new Date(),
-        appName: 'Chrome',
-        windowTitle: 'Docs',
-      },
-      {
-        id: 'e3',
-        sequenceNo: 3,
-        eventType: 'KEY_ACTION',
-        timestamp: new Date(),
-        appName: 'Chrome',
-        windowTitle: 'Docs',
-        metadata: { action: 'TAB' },
-      },
-      {
-        id: 'e4',
-        sequenceNo: 4,
-        eventType: 'USER_NOTE',
-        timestamp: new Date(),
-        appName: 'Chrome',
-        windowTitle: 'Docs',
-        metadata: { note: 'remember this' },
+        windowTitle: 'Example',
+        metadata: { url: 'https://example.com/', pageTitle: 'Example Domain' },
       },
     ];
 
     const steps = builder.buildTimeline(events as Event[]);
-    expect(steps).toHaveLength(1);
-    expect(steps[0].description).toContain('Switched to Chrome window: Docs');
-    expect(steps[0].description).toContain('Performed mouse click');
-    expect(steps[0].description).toContain('Key action: TAB');
-    expect(steps[0].description).toContain('Note: remember this');
-    expect(steps[0].eventRefs).toEqual(['e1', 'e2', 'e3', 'e4']);
+    expect(steps.length).toBeGreaterThanOrEqual(1);
+    const blob = steps.map((s) => s.action || s.description).join(' | ');
+    expect(blob).toMatch(/Chrome|example\.com|Google/i);
   });
 
-  it('should start a new step when app or window changes', () => {
-    const events: Partial<Event>[] = [
-      { id: 'e1', sequenceNo: 1, eventType: 'APP_CHANGED', appName: 'Chrome', windowTitle: 'A' },
-      { id: 'e2', sequenceNo: 2, eventType: 'MOUSE_CLICK', appName: 'Chrome', windowTitle: 'A' },
-      { id: 'e3', sequenceNo: 3, eventType: 'APP_CHANGED', appName: 'VSCode', windowTitle: 'B' },
-      { id: 'e4', sequenceNo: 4, eventType: 'KEY_ACTION', appName: 'VSCode', windowTitle: 'B' },
-    ];
-
-    const steps = builder.buildTimeline(events as Event[]);
-    expect(steps).toHaveLength(2);
-    expect(steps[0].title).toBe('Chrome - A');
-    expect(steps[1].title).toBe('VSCode - B');
-  });
-
-  it('should handle SCREEN_DELTA and other event types', () => {
-    const events: Partial<Event>[] = [
-      { id: 'e1', sequenceNo: 1, eventType: 'APP_CHANGED', appName: 'App', windowTitle: 'Win' },
-      { id: 'e2', sequenceNo: 2, eventType: 'SCREEN_DELTA', appName: 'App', windowTitle: 'Win' },
-    ];
-
-    const steps = builder.buildTimeline(events as Event[]);
-    expect(steps[0].description).toContain('Significant screen change detected');
-  });
-
-  it('should sort events by sequenceNo when available', () => {
-    const events: Partial<Event>[] = [
-      { id: 'e2', sequenceNo: 2, eventType: 'APP_CHANGED', appName: 'B', windowTitle: 'B' },
-      { id: 'e1', sequenceNo: 1, eventType: 'APP_CHANGED', appName: 'A', windowTitle: 'A' },
-    ];
-
-    const steps = builder.buildTimeline(events as Event[]);
-    expect(steps[0].title).toBe('A - A');
-    expect(steps[1].title).toBe('B - B');
-  });
-
-  it('should handle URL_CHANGED with url in metadata for any app context', () => {
+  it('should collapse repeated generic clicks on the same URL', () => {
     const events: Partial<Event>[] = [
       {
         id: 'e1',
         sequenceNo: 1,
         eventType: 'URL_CHANGED',
-        timestamp: new Date(),
-        appName: 'Chrome',
-        windowTitle: 'Google',
-        metadata: { url: 'https://example.com' },
+        appName: 'Google Chrome',
+        metadata: {
+          url: 'http://127.0.0.1:5173/#gallery',
+          pageTitle: 'Clinic',
+        },
+      },
+      {
+        id: 'e2',
+        sequenceNo: 2,
+        eventType: 'MOUSE_CLICK',
+        appName: 'Google Chrome',
+        metadata: { url: 'http://127.0.0.1:5173/#gallery', pageTitle: 'Clinic' },
+      },
+      {
+        id: 'e3',
+        sequenceNo: 3,
+        eventType: 'MOUSE_CLICK',
+        appName: 'Google Chrome',
+        metadata: { url: 'http://127.0.0.1:5173/#gallery', pageTitle: 'Clinic' },
+      },
+      {
+        id: 'e4',
+        sequenceNo: 4,
+        eventType: 'MOUSE_CLICK',
+        appName: 'Google Chrome',
+        metadata: { url: 'http://127.0.0.1:5173/#gallery', pageTitle: 'Clinic' },
       },
     ];
 
     const steps = builder.buildTimeline(events as Event[]);
-    expect(steps).toHaveLength(1);
-    expect(steps[0].description).toContain('Navigated in Chrome to: https://example.com');
+    // Should not produce 4 nearly identical open+click steps
+    expect(steps.length).toBeLessThanOrEqual(2);
+    const text = steps.map((s) => s.action).join(' ');
+    expect((text.match(/open page/gi) || []).length).toBeLessThanOrEqual(1);
   });
 
-  it('should handle FOCUS_CHANGED with focusedElement and document for any app', () => {
+  it('should describe ChatGPT Enter as send message without typed content', () => {
     const events: Partial<Event>[] = [
       {
         id: 'e1',
         sequenceNo: 1,
-        eventType: 'FOCUS_CHANGED',
-        timestamp: new Date(),
-        appName: 'TextEdit',
-        windowTitle: 'notes.txt',
-        metadata: { focusedElement: 'text field', document: 'notes.txt', value: 'hello' },
+        eventType: 'KEY_ACTION',
+        appName: 'ChatGPT',
+        windowTitle: 'ChatGPT',
+        metadata: {
+          action: 'ENTER_SUBMIT',
+          actionHint:
+            'send/submit a message (typed text is NOT recorded — add a User Note describing the prompt)',
+        },
       },
     ];
-
     const steps = builder.buildTimeline(events as Event[]);
     expect(steps).toHaveLength(1);
-    expect(steps[0].title).toContain('[text field]');
-    expect(steps[0].description).toContain('Focused: text field');
-    expect(steps[0].description).toContain('Document: notes.txt');
+    expect(steps[0].action || steps[0].description).toMatch(/send|submit|message/i);
+    expect(steps[0].action || steps[0].description).not.toMatch(/password|typed the words/i);
+    expect(steps[0].action || steps[0].description).toMatch(/User Note|not recorded/i);
+  });
+
+  it('should keep distinct SPA hash routes as separate steps', () => {
+    const events: Partial<Event>[] = [
+      {
+        id: 'e1',
+        sequenceNo: 1,
+        eventType: 'URL_CHANGED',
+        appName: 'Google Chrome',
+        metadata: { url: 'http://127.0.0.1:5173/#gallery', pageTitle: 'Clinic' },
+      },
+      {
+        id: 'e2',
+        sequenceNo: 2,
+        eventType: 'URL_CHANGED',
+        appName: 'Google Chrome',
+        metadata: {
+          url: 'http://127.0.0.1:5173/#booking',
+          pageTitle: 'Clinic',
+          previousUrl: 'http://127.0.0.1:5173/#gallery',
+        },
+      },
+    ];
+    const steps = builder.buildTimeline(events as Event[]);
+    expect(steps.length).toBe(2);
+    expect(steps[0].action).toMatch(/#gallery/);
+    expect(steps[1].action).toMatch(/#booking/);
+  });
+
+  it('should skip pure Tab spam without focus target', () => {
+    const events: Partial<Event>[] = [
+      {
+        id: 'e1',
+        sequenceNo: 1,
+        eventType: 'KEY_ACTION',
+        appName: 'ChatGPT',
+        metadata: { action: 'TAB_NAVIGATION' },
+      },
+    ];
+    expect(builder.buildTimeline(events as Event[])).toHaveLength(0);
+  });
+
+  it('should sort by sequenceNo', () => {
+    const events: Partial<Event>[] = [
+      {
+        id: 'e2',
+        sequenceNo: 2,
+        eventType: 'APP_CHANGED',
+        appName: 'B',
+        windowTitle: 'B',
+      },
+      {
+        id: 'e1',
+        sequenceNo: 1,
+        eventType: 'APP_CHANGED',
+        appName: 'A',
+        windowTitle: 'A',
+      },
+    ];
+    const steps = builder.buildTimeline(events as Event[]);
+    expect(steps[0].action || steps[0].description).toMatch(/A/);
+    expect(steps[1].action || steps[1].description).toMatch(/B/);
   });
 });

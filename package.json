@@ -18,6 +18,11 @@
     "db:control:generate": "cd apps/api-server && npx prisma generate",
     "seed:control": "cd apps/api-server && npx tsx scripts/seed-control.ts",
     "api:dev": "cd apps/api-server && npm run build && ALLOW_DEV_CLIENT_HEADER=true node dist/main.js",
+    "dev:up": "bash scripts/dev-up.sh",
+    "dev:up:desktop": "bash scripts/dev-up.sh --desktop",
+    "dev:setup": "bash scripts/dev-up.sh --no-start",
+    "dev:down": "bash scripts/dev-down.sh",
+    "dev:down:infra": "bash scripts/dev-down.sh --infra",
     "typecheck": "npm run typecheck --workspaces --if-present || npx tsc -p apps/api-server/tsconfig.json --noEmit"
   },
   "devDependencies": {

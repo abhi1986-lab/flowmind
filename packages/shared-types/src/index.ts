@@ -33,6 +33,9 @@ export type EventType =
   | 'SESSION_STOP'
   | 'APP_CHANGED'
   | 'WINDOW_CHANGED'
+  | 'URL_CHANGED'
+  | 'FOCUS_CHANGED'
+  | 'UI_ACTION' // selection change / meaningful in-window state (no keylogging)
   | 'MOUSE_CLICK'
   | 'KEY_ACTION' // Only safe categories: TAB_NAVIGATION, ENTER_SUBMIT, ESC_CANCEL, SHORTCUT
   | 'SCREEN_DELTA'

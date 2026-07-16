@@ -38,7 +38,7 @@ describe('AuthService', () => {
     it('should return an access token and user info for valid credentials', async () => {
       const result = await service.login('admin@acme.test', 'demo123');
 
-      expect(result).toHaveProperty('accessToken', 'mock-token');
+      expect(result).toHaveProperty('accessToken', 'mock.jwt.token');
       expect(result.user).toMatchObject({
         email: 'admin@acme.test',
         role: 'CLIENT_ADMIN',

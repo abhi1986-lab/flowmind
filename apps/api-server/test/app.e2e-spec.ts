@@ -20,7 +20,23 @@ describe('AppController (e2e)', () => {
     return request(app.getHttpServer())
       .get('/')
       .expect(200)
-      .expect('Hello World!');
+      .expect({
+        name: 'FlowMind AI API',
+        description: 'Operational Workflow Intelligence Platform (consent-based)',
+        version: '0.1.0-mvp',
+        constraints: 'See root README.md and docs-pack for non-negotiable rules.',
+      });
+  });
+
+  it('/health (GET)', () => {
+    return request(app.getHttpServer())
+      .get('/health')
+      .expect(200)
+      .expect((res) => {
+        expect(res.body.status).toBe('ok');
+        expect(res.body.service).toBe('flowmind-api');
+        expect(res.body).toHaveProperty('timestamp');
+      });
   });
 
   afterEach(async () => {

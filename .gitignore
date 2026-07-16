@@ -63,3 +63,8 @@ coverage/
 .cache/
 tmp/
 tmp-*/
+
+# Local dev runner
+.dev-logs/
+.dev-pids/
+apps/api-server/.env
