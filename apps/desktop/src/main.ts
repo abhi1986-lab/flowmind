@@ -1,20 +1,22 @@
 /**
  * FlowMind Desktop Agent - Electron Main
  *
- * Capture model v2 (consent-based, visible, user-controlled):
- * - App / window switches
- * - Browser URL + tab title
- * - Mouse clicks (global, no keylogging) → snapshot of focused UI after click
- * - Safe key categories only: Tab / Enter / Escape
- * - Accessibility focus path, selection, document when available
+ * Capture model v3 (consent-based, visible, user-controlled):
+ * - App / window switches, browser URL + tab title
+ * - Mouse clicks + Tab/Enter/Escape (no keystream)
+ * - Accessibility focus path when available
+ * - Opt-in TEXT CONTEXT (not keylogging):
+ *     - TEXT_INPUT: field value snapshot on commit (Enter) or focus leave
+ *     - PASTE_INPUT: clipboard text on Cmd/Ctrl+V (redacted)
  *
  * Privacy:
- * - No raw keystream, no passwords, no clipboard dump
- * - Secure fields redacted
+ * - Never store raw keystreams
+ * - Secure/password fields never captured
  * - FlowMind recorder window is ignored
+ * - Text context only when operator enables Intent Capture for the session
  */
 
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain } from 'electron';
 import * as path from 'path';
 import { spawn } from 'child_process';
 
@@ -31,6 +33,8 @@ type UiSnapshot = {
   focusedName?: string;
   focusedDescription?: string;
   focusedValue?: string;
+  /** Non-secure field text for intent capture (on-commit). Not a keystream. */
+  intentText?: string;
   focusPath?: string;
   selection?: string;
   actionHint?: string;
@@ -64,6 +68,34 @@ function sanitizeFieldValue(
   if (raw.length > 80) return `[text length ${raw.length}]`;
   if (/^\d{8,}$/.test(raw)) return '[numeric-id]';
   return clean(raw, 80);
+}
+
+function looksLikeSecret(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 4) return false;
+  if (/^(sk-|xai-|ghp_|gho_|AKIA|ASIA|xox[baprs]-)/i.test(t)) return true;
+  if (/password\s*[:=]/i.test(t) && t.length < 80) return true;
+  if (/^-----BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY-----/.test(t)) return true;
+  if (/bearer\s+[a-z0-9._\-]+/i.test(t)) return true;
+  return false;
+}
+
+/** Intent-safe text: final field/clipboard content, never secure fields or secrets. */
+function toIntentText(
+  role: string | undefined,
+  name: string | undefined,
+  raw: string | undefined,
+  max = 1500,
+): string | undefined {
+  if (!raw || MISSING.test(raw)) return undefined;
+  if (isSensitiveRole(role, name)) return undefined;
+  const t = String(raw).replace(/\r\n/g, '\n').trim();
+  if (!t || MISSING.test(t)) return undefined;
+  if (looksLikeSecret(t)) return undefined;
+  // Skip pure UI noise
+  if (t.length < 2) return undefined;
+  if (t.length > max) return t.slice(0, max) + '…';
+  return t;
 }
 
 function isFlowMindWindow(appName: string, windowTitle: string): boolean {
@@ -337,6 +369,7 @@ end tell
   let focusedName: string | undefined;
   let focusedDescription: string | undefined;
   let focusedValue: string | undefined;
+  let intentText: string | undefined;
   let selection: string | undefined;
   let document: string | undefined;
   let webTitle: string | undefined;
@@ -349,8 +382,11 @@ end tell
     focusedName = clean(parts[1], 120);
     focusedDescription = clean(parts[2], 160) || clean(parts[8], 160);
     focusedHelp = clean(parts[8], 160);
-    const rawVal = clean(parts[3], 500);
+    const rawValFull =
+      parts[3] && !MISSING.test(String(parts[3]).trim()) ? String(parts[3]).trim() : undefined;
+    const rawVal = clean(rawValFull, 500);
     focusedValue = sanitizeFieldValue(focusedRole, focusedName, rawVal);
+    intentText = toIntentText(focusedRole, focusedName, rawValFull, 1500);
     selection = clean(parts[4], 200);
     document = clean(parts[5], 300);
     if (document?.startsWith('file://')) {
@@ -414,6 +450,7 @@ end tell
     focusedName,
     focusedDescription: focusedDescription || focusedHelp,
     focusedValue,
+    intentText,
     focusPath,
     selection,
     actionHint,
@@ -579,6 +616,19 @@ let hooksRunning = false;
 let captureArmed = false; // true only while user-started recording
 let clickBusy = false;
 let hooksWired = false;
+/** Opt-in: capture field/paste text on commit (not a keystream). */
+let intentCaptureEnabled = true;
+/** Track last focused field text to emit on focus-leave. */
+let pendingField: {
+  appName: string;
+  windowTitle: string;
+  url?: string;
+  pageTitle?: string;
+  fieldName?: string;
+  fieldRole?: string;
+  text: string;
+} | null = null;
+let lastEmittedIntentHash = '';
 
 // Optional global mouse/key hooks (safe categories only for keys)
 let uiohookMod: {
@@ -630,7 +680,7 @@ function createWindow() {
       </style>
       </head>
       <body>
-        <h1>FlowMind — Activity Capture v2</h1>
+        <h1>FlowMind — Activity Capture v3</h1>
         <div id="loginStatus" class="status idle">Not logged in</div>
         <button id="loginBtn">Login (demo contributor@acme.test)</button>
 
@@ -639,13 +689,20 @@ function createWindow() {
           <div>Status: <span id="sessionStatus">IDLE</span></div>
           <div>Events sent: <span id="eventCount">0</span></div>
           <div>Last captured: <span id="lastCaptured">-</span></div>
+          <label style="display:flex;gap:8px;align-items:flex-start;margin:10px 0;cursor:pointer">
+            <input id="intentToggle" type="checkbox" checked style="width:auto;margin-top:3px" />
+            <span>
+              <strong>Intent text capture</strong> (recommended for robust SOPs)<br/>
+              <span style="opacity:0.75">Captures field text on Enter/focus-leave and paste — <em>not</em> a keystream. Passwords never captured.</span>
+            </span>
+          </label>
           <button id="createBtn" disabled>Create Session</button>
           <button id="startBtn" disabled>Start Session</button>
           <button id="stopBtn" disabled>Stop Session</button>
         </div>
 
         <div class="section">
-          <strong>Annotate (highly recommended for ChatGPT / web apps):</strong><br>
+          <strong>Annotate (backup when apps hide text):</strong><br>
           <input id="noteInput" placeholder="e.g. Asked ChatGPT to summarize Q3 report" disabled>
           <button id="noteBtn" disabled>Add User Note</button>
         </div>
@@ -661,13 +718,11 @@ function createWindow() {
         <div id="error" style="color:#f87171;min-height:1em;font-weight:bold"></div>
 
         <p class="hint">
-          <b>Captures while recording:</b> app switches, browser URL + tab title,
-          <b>mouse clicks</b> (with focused control when Accessibility allows),
-          Tab/Enter/Escape only (no typing stream).<br/><br/>
-          Grant <b>Accessibility</b> and <b>Input Monitoring</b> (for click hooks) to Terminal/Electron,
-          then relaunch. FlowMind’s own window is ignored.<br/><br/>
-          Apps like <b>ChatGPT</b> often hide UI structure — use <b>User Note</b> for intent
-          (“generated summary”, “copied answer”).
+          <b>Captures:</b> apps, URLs, clicks, Tab/Enter/Esc,
+          and (if Intent on) <b>committed text + pastes</b> for SOP context.<br/><br/>
+          This is <b>not keylogging</b>: we never store per-key events; only snapshots on commit/paste.
+          Grant <b>Accessibility</b> + <b>Input Monitoring</b>. FlowMind’s window is ignored.<br/><br/>
+          If ChatGPT hides text from Accessibility, paste prompts or add a User Note.
         </p>
 
         <script>
@@ -729,13 +784,30 @@ function createWindow() {
               isRecording = false; eventCount = 0; updateUI();
             } catch (e) { showError(e.message || e); }
           };
+          $('intentToggle').onchange = () => {
+            if (window.flowmind.setIntentCapture) {
+              window.flowmind.setIntentCapture(!!$('intentToggle').checked);
+            }
+          };
+          // sync default
+          if (window.flowmind.setIntentCapture) {
+            window.flowmind.setIntentCapture(!!$('intentToggle').checked);
+          }
+
           $('startBtn').onclick = async () => {
             if (!currentSessionId) return;
             try {
+              if (window.flowmind.setIntentCapture) {
+                window.flowmind.setIntentCapture(!!$('intentToggle').checked);
+              }
               await apiCall('POST', '/agent/sessions/' + currentSessionId + '/start');
               isRecording = true; updateUI();
               window.flowmind.startRecording(currentSessionId);
-              showResponse({ message: 'Recording. Click through your workflow; add User Notes for intent.' });
+              showResponse({
+                message: $('intentToggle').checked
+                  ? 'Recording with intent text capture (on-commit + paste).'
+                  : 'Recording without text capture. Use User Notes for intent.'
+              });
             } catch (e) { showError(e.message || e); }
           };
           $('stopBtn').onclick = async () => {
@@ -780,10 +852,16 @@ function createWindow() {
             if (!isRecording || !currentSessionId) return;
             const metadata = Object.assign({}, data.metadata || {});
             ['url','pageTitle','document','focusedRole','focusedName','focusedElement',
-             'focusedDescription','value','focusPath','selection','actionHint','action'].forEach((k) => {
+             'focusedDescription','value','focusPath','selection','actionHint','action',
+             'text','textPreview','captureMode'].forEach((k) => {
               if (data[k] && !metadata[k]) metadata[k] = data[k];
             });
             if (data.focusedValue && !metadata.value) metadata.value = data.focusedValue;
+            if (data.metadata) {
+              Object.keys(data.metadata).forEach((k) => {
+                if (data.metadata[k] != null && metadata[k] == null) metadata[k] = data.metadata[k];
+              });
+            }
             Object.keys(metadata).forEach((k) => {
               if (metadata[k] == null || metadata[k] === '' || metadata[k] === 'missing value') delete metadata[k];
             });
@@ -869,16 +947,112 @@ let lastSelection = '';
 let lastFingerprint = '';
 let lastEmitAt = 0;
 
-function emitToRenderer(payload: ReturnType<typeof snapToPayload>) {
+function emitToRenderer(payload: {
+  eventType: string;
+  timestamp: string;
+  appName: string;
+  windowTitle?: string;
+  actionHint?: string;
+  metadata?: Record<string, string>;
+  [key: string]: unknown;
+}) {
   if (!mainWindow) return;
   // Always ignore FlowMind recorder noise
-  if (isFlowMindWindow(payload.appName, payload.windowTitle || '')) {
+  if (isFlowMindWindow(payload.appName, String(payload.windowTitle || ''))) {
     console.log('[capture] skip FlowMind window');
     return;
   }
   lastEmitAt = Date.now();
   mainWindow.webContents.send('active-window-changed', payload);
   console.log('[capture]', payload.eventType, payload.appName, payload.actionHint || '');
+}
+
+function emitTextContext(
+  eventType: 'TEXT_INPUT' | 'PASTE_INPUT',
+  snap: Partial<UiSnapshot> & { appName: string; windowTitle: string },
+  text: string,
+  fieldLabel?: string,
+) {
+  if (!intentCaptureEnabled || !captureArmed || !mainWindow) return;
+  if (isFlowMindWindow(snap.appName, snap.windowTitle || '')) return;
+  const cleaned = toIntentText(snap.focusedRole, fieldLabel || snap.focusedName, text, 1500);
+  if (!cleaned) return;
+  const hash = `${eventType}|${snap.appName}|${cleaned.slice(0, 200)}`;
+  if (hash === lastEmittedIntentHash) return;
+  lastEmittedIntentHash = hash;
+
+  const preview = cleaned.length > 120 ? cleaned.slice(0, 117) + '…' : cleaned;
+  const actionHint =
+    eventType === 'PASTE_INPUT'
+      ? `paste text${fieldLabel ? ` into "${fieldLabel}"` : ''}: "${preview}"`
+      : `enter/submit text${fieldLabel ? ` in "${fieldLabel}"` : ''}: "${preview}"`;
+
+  const metadata: Record<string, string> = {
+    text: cleaned,
+    textPreview: preview,
+    actionHint,
+    captureMode: 'intent-on-commit',
+  };
+  if (fieldLabel) metadata.focusedName = fieldLabel;
+  if (snap.focusedRole) metadata.focusedRole = snap.focusedRole;
+  if (snap.url) metadata.url = snap.url;
+  if (snap.pageTitle) metadata.pageTitle = snap.pageTitle;
+
+  emitToRenderer({
+    eventType,
+    timestamp: new Date().toISOString(),
+    appName: snap.appName,
+    windowTitle: snap.pageTitle || snap.windowTitle,
+    url: snap.url,
+    pageTitle: snap.pageTitle,
+    focusedRole: snap.focusedRole,
+    focusedName: fieldLabel || snap.focusedName,
+    focusedElement: fieldLabel || snap.focusedName || snap.focusedRole,
+    actionHint,
+    metadata,
+  });
+}
+
+function rememberPendingField(snap: UiSnapshot) {
+  if (!intentCaptureEnabled || !snap.intentText) {
+    return;
+  }
+  pendingField = {
+    appName: snap.appName,
+    windowTitle: snap.windowTitle,
+    url: snap.url,
+    pageTitle: snap.pageTitle,
+    fieldName: snap.focusedName,
+    fieldRole: snap.focusedRole,
+    text: snap.intentText,
+  };
+}
+
+function flushPendingFieldIfChanged(next?: UiSnapshot | null) {
+  if (!pendingField || !intentCaptureEnabled) return;
+  const sameFocus =
+    next &&
+    next.appName === pendingField.appName &&
+    (next.focusedName || '') === (pendingField.fieldName || '') &&
+    (next.intentText || '') === pendingField.text;
+  if (sameFocus) return;
+  // Focus left or text committed elsewhere — emit prior field content
+  if (pendingField.text.length >= 2) {
+    emitTextContext(
+      'TEXT_INPUT',
+      {
+        appName: pendingField.appName,
+        windowTitle: pendingField.windowTitle,
+        url: pendingField.url,
+        pageTitle: pendingField.pageTitle,
+        focusedRole: pendingField.fieldRole,
+        focusedName: pendingField.fieldName,
+      },
+      pendingField.text,
+      pendingField.fieldName,
+    );
+  }
+  pendingField = null;
 }
 
 let lastClickAt = 0;
@@ -888,6 +1062,26 @@ async function emitClickOrKey(kind: 'MOUSE_CLICK' | 'KEY_ACTION', keyAction?: st
   if (clickBusy) return;
   clickBusy = true;
   try {
+    // On Enter: snapshot field text FIRST (before chat apps clear the composer)
+    let preSubmitSnap: UiSnapshot | null = null;
+    if (kind === 'KEY_ACTION' && keyAction === 'ENTER_SUBMIT' && intentCaptureEnabled) {
+      preSubmitSnap = await captureUiSnapshot();
+      if (
+        preSubmitSnap &&
+        !isFlowMindWindow(preSubmitSnap.appName, preSubmitSnap.windowTitle) &&
+        (preSubmitSnap.intentText || pendingField?.text)
+      ) {
+        const text = preSubmitSnap.intentText || pendingField?.text || '';
+        emitTextContext(
+          'TEXT_INPUT',
+          preSubmitSnap,
+          text,
+          preSubmitSnap.focusedName || pendingField?.fieldName,
+        );
+        pendingField = null;
+      }
+    }
+
     // Let focus settle on the clicked control
     await new Promise((r) => setTimeout(r, kind === 'MOUSE_CLICK' ? 150 : 80));
     const snap = await captureUiSnapshot();
@@ -940,23 +1134,43 @@ async function emitClickOrKey(kind: 'MOUSE_CLICK' | 'KEY_ACTION', keyAction?: st
     if (keyAction) extras.action = keyAction;
 
     emitToRenderer(snapToPayload(snap, kind, extras));
+    rememberPendingField(snap);
 
-    // Nudge operator to annotate ChatGPT prompts (content never auto-captured)
+    // If intent capture off or AX empty, still nudge for chat apps
     if (
       kind === 'KEY_ACTION' &&
       keyAction === 'ENTER_SUBMIT' &&
       isChatLikeApp(snap.appName) &&
       mainWindow
     ) {
+      const hadText = !!(preSubmitSnap?.intentText || pendingField?.text);
       mainWindow.webContents.send('capture-tip', {
-        message:
-          'ChatGPT message content is not recorded (privacy). Add a User Note describing what you asked.',
+        message: hadText
+          ? 'Captured message text for SOP (intent mode). Edit in SOP viewer if needed.'
+          : 'Could not read chat text via Accessibility. Add a User Note describing the prompt.',
       });
     }
   } catch (e) {
     console.error('[capture] click/key emit failed', e);
   } finally {
     clickBusy = false;
+  }
+}
+
+function emitPasteFromClipboard() {
+  if (!intentCaptureEnabled || !captureArmed) return;
+  try {
+    const text = clipboard.readText('clipboard');
+    if (!text || !text.trim()) return;
+    // Fire-and-forget async snapshot for app context
+    void (async () => {
+      const snap = await captureUiSnapshot();
+      if (!snap || isFlowMindWindow(snap.appName, snap.windowTitle)) return;
+      emitTextContext('PASTE_INPUT', snap, text.trim(), snap.focusedName);
+      rememberPendingField({ ...snap, intentText: toIntentText(snap.focusedRole, snap.focusedName, text) });
+    })();
+  } catch (e) {
+    console.warn('[capture] paste read failed', e);
   }
 }
 
@@ -971,8 +1185,14 @@ function wireCaptureHooksOnce() {
     void emitClickOrKey('MOUSE_CLICK');
   });
 
-  uIOhook.on('keydown', (e: { keycode: number }) => {
+  uIOhook.on('keydown', (e: { keycode: number; metaKey?: boolean; ctrlKey?: boolean }) => {
     if (!captureArmed) return;
+    // Paste (Cmd+V / Ctrl+V) — context capture, not keylogging
+    const vKey = UiohookKey.V;
+    if (e.keycode === vKey && (e.metaKey || e.ctrlKey)) {
+      emitPasteFromClipboard();
+      return;
+    }
     // Safe categories only — never capture character stream
     if (e.keycode === UiohookKey.Tab) void emitClickOrKey('KEY_ACTION', 'TAB_NAVIGATION');
     else if (e.keycode === UiohookKey.Enter || e.keycode === UiohookKey.NumpadEnter)
@@ -1010,6 +1230,11 @@ function stopCaptureHooks() {
   console.log('[capture] global hooks stopped');
 }
 
+ipcMain.on('set-intent-capture', (_e, enabled: boolean) => {
+  intentCaptureEnabled = !!enabled;
+  console.log('[capture] intentCaptureEnabled =', intentCaptureEnabled);
+});
+
 ipcMain.on('start-recording', () => {
   if (recordingInterval) clearInterval(recordingInterval);
 
@@ -1019,6 +1244,8 @@ ipcMain.on('start-recording', () => {
   lastFocusKey = '';
   lastSelection = '';
   lastFingerprint = '';
+  pendingField = null;
+  lastEmittedIntentHash = '';
 
   startCaptureHooks();
 
@@ -1032,6 +1259,19 @@ ipcMain.on('start-recording', () => {
       const snap = await captureUiSnapshot();
       if (!snap || !mainWindow) return;
       if (isFlowMindWindow(snap.appName, snap.windowTitle)) return;
+
+      // Track field text for focus-leave commits
+      if (intentCaptureEnabled && snap.intentText) {
+        const focusId = `${snap.appName}|${snap.focusedName || ''}|${snap.focusedRole || ''}`;
+        const prevId = pendingField
+          ? `${pendingField.appName}|${pendingField.fieldName || ''}|${pendingField.fieldRole || ''}`
+          : '';
+        if (prevId && prevId !== focusId) {
+          flushPendingFieldIfChanged(snap);
+        }
+        rememberPendingField(snap);
+      }
+
       if (snap.fingerprint === lastFingerprint) return;
 
       const prevUrl = lastUrl;

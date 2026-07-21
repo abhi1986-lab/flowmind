@@ -95,6 +95,27 @@ export function describeAction(ev: Event, opts?: { alreadyOnUrl?: string }): str
     return `Operator note: ${note}`;
   }
 
+  const textContent =
+    pickMeta(meta.text, meta.textPreview, meta.note) ||
+    (ev.eventType === 'TEXT_INPUT' || ev.eventType === 'PASTE_INPUT'
+      ? pickMeta(meta.value)
+      : undefined);
+
+  if (ev.eventType === 'TEXT_INPUT' && textContent) {
+    const field = pickMeta(meta.focusedName, meta.focusedElement);
+    const place = url || pageTitle ? ` on ${shortPlace(url, pageTitle, win)}` : '';
+    const preview =
+      textContent.length > 160 ? `${textContent.slice(0, 157)}…` : textContent;
+    return `In ${app}${place}, enter text${field ? ` in "${field}"` : ''}: "${preview}"`;
+  }
+
+  if (ev.eventType === 'PASTE_INPUT' && textContent) {
+    const field = pickMeta(meta.focusedName, meta.focusedElement);
+    const preview =
+      textContent.length > 160 ? `${textContent.slice(0, 157)}…` : textContent;
+    return `In ${app}, paste text${field ? ` into "${field}"` : ''}: "${preview}"`;
+  }
+
   // Prefer explicit actionHint unless it's low-value / redundant open spam
   if (actionHint) {
     const lowValue =
@@ -165,7 +186,7 @@ export function describeAction(ev: Event, opts?: { alreadyOnUrl?: string }): str
     case 'KEY_ACTION': {
       if (keyAction === 'ENTER_SUBMIT') {
         if (isChatLike(app)) {
-          return `In ${app}, send/submit a message (typed text is not recorded — add a User Note describing the prompt)`;
+          return `In ${app}, send/submit the message (see prior text step if intent capture was on)`;
         }
         return `In ${app}, press Enter to submit${focused ? ` on "${focused}"` : ''}${
           url ? ` on ${shortPlace(url, pageTitle)}` : ''
@@ -222,6 +243,10 @@ function semanticKey(ev: Event, action: string): string {
   const keyAction = pickMeta(meta.action) || '';
   // Group by meaning, not by every event type
   if (ev.eventType === 'USER_NOTE') return `note|${note}`;
+  if (ev.eventType === 'TEXT_INPUT')
+    return `text|${app}|${url}|${pickMeta(meta.text)?.slice(0, 80) || ''}`;
+  if (ev.eventType === 'PASTE_INPUT')
+    return `paste|${app}|${url}|${pickMeta(meta.text)?.slice(0, 80) || ''}`;
   if (ev.eventType === 'KEY_ACTION' && keyAction === 'ENTER_SUBMIT')
     return `enter|${app}|${url}|${focused}`;
   if (ev.eventType === 'MOUSE_CLICK') return `click|${app}|${url}|${focused || 'page'}`;

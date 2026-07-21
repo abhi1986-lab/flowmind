@@ -90,7 +90,7 @@ describe('TimelineBuilder', () => {
     expect((text.match(/open page/gi) || []).length).toBeLessThanOrEqual(1);
   });
 
-  it('should describe ChatGPT Enter as send message without typed content', () => {
+  it('should describe ChatGPT Enter as send message', () => {
     const events: Partial<Event>[] = [
       {
         id: 'e1',
@@ -100,16 +100,31 @@ describe('TimelineBuilder', () => {
         windowTitle: 'ChatGPT',
         metadata: {
           action: 'ENTER_SUBMIT',
-          actionHint:
-            'send/submit a message (typed text is NOT recorded — add a User Note describing the prompt)',
+          actionHint: 'send/submit the message (see prior text step if intent capture was on)',
         },
       },
     ];
     const steps = builder.buildTimeline(events as Event[]);
     expect(steps).toHaveLength(1);
     expect(steps[0].action || steps[0].description).toMatch(/send|submit|message/i);
-    expect(steps[0].action || steps[0].description).not.toMatch(/password|typed the words/i);
-    expect(steps[0].action || steps[0].description).toMatch(/User Note|not recorded/i);
+  });
+
+  it('should surface TEXT_INPUT content in procedure steps', () => {
+    const events: Partial<Event>[] = [
+      {
+        id: 'e1',
+        sequenceNo: 1,
+        eventType: 'TEXT_INPUT',
+        appName: 'ChatGPT',
+        metadata: {
+          text: 'Rewrite the homepage hero for SEO',
+          focusedName: 'Message',
+        },
+      },
+    ];
+    const steps = builder.buildTimeline(events as Event[]);
+    expect(steps).toHaveLength(1);
+    expect(steps[0].action || steps[0].description).toContain('Rewrite the homepage hero for SEO');
   });
 
   it('should keep distinct SPA hash routes as separate steps', () => {

@@ -38,6 +38,8 @@ export type EventType =
   | 'UI_ACTION' // selection change / meaningful in-window state (no keylogging)
   | 'MOUSE_CLICK'
   | 'KEY_ACTION' // Only safe categories: TAB_NAVIGATION, ENTER_SUBMIT, ESC_CANCEL, SHORTCUT
+  | 'TEXT_INPUT' // On-commit field snapshot (NOT a keystream). Opt-in intent capture.
+  | 'PASTE_INPUT' // Clipboard paste payload (redacted). Opt-in intent capture.
   | 'SCREEN_DELTA'
   | 'USER_NOTE'
   | 'FALLBACK_TICK'; // time fallback only, rare
@@ -49,7 +51,12 @@ export interface CapturedEvent {
   timestamp: string; // ISO
   appName?: string;
   windowTitle?: string;
-  metadata?: Record<string, any>; // safe metadata only. NO raw keystrokes, passwords, or form content.
+  /**
+   * Safe metadata. Never store raw keystreams.
+   * TEXT_INPUT/PASTE_INPUT may include truncated `text` / `textPreview` when intent capture is on.
+   * Passwords / secure fields must never appear.
+   */
+  metadata?: Record<string, any>;
   note?: string; // for USER_NOTE
 }
 

@@ -201,8 +201,8 @@ function defaultPrereqs(apps: string[]): string[] {
 function defaultExceptions(): string[] {
   return [
     'If an application, window, URL, or control label differs from the captured step, pause and confirm with a reviewer before improvising.',
-    'Never type passwords or secrets into User Notes; secure fields are redacted by design.',
-    'If Accessibility cannot expose in-window detail (some Electron/web apps), add a User Note describing the action during capture and refine the SOP in review.',
+    'Never capture or document passwords, OTPs, or API keys. Secure fields are blocked from intent capture.',
+    'Text shown in steps comes from on-commit field snapshots or paste (not keylogging). If a step lacks text, Accessibility may have been blocked — add a reviewer note.',
     'For errors or unexpected dialogs, capture a User Note and follow the team exception process.',
   ];
 }

@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld('flowmind', {
   onCaptureTip: (callback: (data: any) => void) => {
     ipcRenderer.on('capture-tip', (_event, data) => callback(data));
   },
+  setIntentCapture: (enabled: boolean) => {
+    ipcRenderer.send('set-intent-capture', enabled);
+  },
   startRecording: (sessionId: string) => {
     ipcRenderer.send('start-recording', sessionId);
   },
