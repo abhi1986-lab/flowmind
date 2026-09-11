@@ -8,7 +8,7 @@
 #
 # IMPORTANT: This is for local/dev only. Follows client-isolated data plane rules.
 # Client data (events, screenshots, SOPs) lives ONLY in the client-specific services.
-# Control plane contains routing metadata ONLY.
+# Control plane contains routing metadata ONLY (secret refs — Gate 0.2).
 
 services:
   # --- Control Plane ---
@@ -122,21 +122,23 @@ services:
       PORT: 4000
       # Control DB
       CONTROL_DATABASE_URL: postgresql://flowmind:flowmind_dev@postgres-control:5432/flowmind_control
-      # Client resolver will construct per-client URLs dynamically from routes table
-      # Example for initial client_a route (seeded):
-      # For dev flexibility, also allow X-Client-Id header + direct client urls if needed.
+      DATABASE_URL: postgresql://flowmind:flowmind_dev@postgres-control:5432/flowmind_control
+      # Gate 0.2: resolve ClientRoute.db_connection_ref "client-a-db" at runtime
+      CLIENT_A_DATABASE_URL: postgresql://client_a:client_a_dev@postgres-client-a:5432/client_a_db
+      CLIENT_DATABASE_URL: postgresql://client_a:client_a_dev@postgres-client-a:5432/client_a_db
       REDIS_URL: redis://redis:6379
       # MinIO (S3) - client specific buckets selected by resolver
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
       S3_FORCE_PATH_STYLE: "true"
-      # JWT
+      # JWT (required outside development)
       JWT_SECRET: dev-super-secret-change-in-real-env
       JWT_EXPIRES_IN: 7d
       # For local dev only: allow header-based client override when host is not subdomain
       ALLOW_DEV_CLIENT_HEADER: "true"
-      # AI provider config (for SOP auto-polish). Switch via AI_PROVIDER in seed or direct DB update to client_routes.ai_config_ref
+      # AI keys from env only (ai_config_ref is a secret ref, not inline JSON)
+      AI_PROVIDER: stub
       # AI_PROVIDER: grok
       # XAI_API_KEY: ${XAI_API_KEY:-}
       # OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -161,6 +163,7 @@ services:
       REDIS_URL: redis://redis:6379
       # Worker also needs control + ability to reach client DBs (via same resolver pattern or direct for jobs)
       CONTROL_DATABASE_URL: postgresql://flowmind:flowmind_dev@postgres-control:5432/flowmind_control
+      CLIENT_A_DATABASE_URL: postgresql://client_a:client_a_dev@postgres-client-a:5432/client_a_db
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
