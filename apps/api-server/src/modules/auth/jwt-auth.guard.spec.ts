@@ -1,12 +1,23 @@
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
+import { JWT_DEV_FALLBACK_SECRET } from '../../common/auth/jwt-secret';
 
 describe('JwtAuthGuard', () => {
   let guard: JwtAuthGuard;
+  const prevNodeEnv = process.env.NODE_ENV;
+  const prevSecret = process.env.JWT_SECRET;
 
   beforeEach(() => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.JWT_SECRET;
     guard = new JwtAuthGuard();
+  });
+
+  afterEach(() => {
+    process.env.NODE_ENV = prevNodeEnv;
+    if (prevSecret === undefined) delete process.env.JWT_SECRET;
+    else process.env.JWT_SECRET = prevSecret;
   });
 
   it('should be defined', () => {
@@ -46,14 +57,20 @@ describe('JwtAuthGuard', () => {
   });
 
   it('should return true and attach user for valid token', () => {
-    // Create a real token with the hardcoded secret used in guard
-    const secret = 'dev-super-secret-change-in-real-env';
     const payload = { sub: 'user1', client_id: 'client1' };
-    const validToken = jwt.sign(payload, secret);
+    const validToken = jwt.sign(payload, JWT_DEV_FALLBACK_SECRET);
 
     const context = mockContext(`Bearer ${validToken}`);
     const result = guard.canActivate(context);
 
     expect(result).toBe(true);
+  });
+
+  it('should verify with JWT_SECRET from env when set', () => {
+    process.env.JWT_SECRET = 'test-env-secret';
+    const payload = { sub: 'user1', client_id: 'client1' };
+    const validToken = jwt.sign(payload, 'test-env-secret');
+    const context = mockContext(`Bearer ${validToken}`);
+    expect(guard.canActivate(context)).toBe(true);
   });
 });
