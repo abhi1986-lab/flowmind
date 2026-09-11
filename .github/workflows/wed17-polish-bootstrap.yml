@@ -1,0 +1,38 @@
+name: wed17-polish-bootstrap
+on:
+  push:
+    paths:
+      - 'scripts/wed17-polish.part*.b64'
+      - '.github/workflows/wed17-polish-bootstrap.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: polish/wed17-demo-ready
+          fetch-depth: 0
+      - name: Apply polish patch
+        run: |
+          set -euo pipefail
+          cat scripts/wed17-polish.part*.b64 | tr -d '\n' | base64 -d | gzip -d > /tmp/wed17.patch
+          git apply --index /tmp/wed17.patch || git apply --index -p0 /tmp/wed17.patch
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "polish(demo): Wed 17 thin-path screen-recording UX" || echo "nothing to commit"
+          git push origin HEAD:polish/wed17-demo-ready
+      - name: Cleanup bootstrap artifacts
+        run: |
+          set -euo pipefail
+          git checkout polish/wed17-demo-ready
+          git pull origin polish/wed17-demo-ready
+          rm -f scripts/wed17-polish.part*.b64 .github/workflows/wed17-polish-bootstrap.yml
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(wed17): remove one-shot polish bootstrap" || exit 0
+          git push origin HEAD:polish/wed17-demo-ready
