@@ -1,0 +1,37 @@
+name: gate03-followups-bootstrap
+on:
+  push:
+    paths:
+      - 'scripts/gate03-followups.part*.b64'
+      - '.github/workflows/gate03-followups-bootstrap.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/gate-0.3-followups-focusedvalue-4xx-shared-strip
+          fetch-depth: 0
+      - name: Apply Gate 0.3 follow-ups patch
+        run: |
+          set -euo pipefail
+          cat scripts/gate03-followups.part*.b64 | tr -d '\n' | base64 -d | gzip -d > /tmp/gate03.patch
+          git apply --index /tmp/gate03.patch || git apply --index -p0 /tmp/gate03.patch
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(gate-0.3): 4xx BadRequest + shared strip wiring + tests" || echo "nothing to commit"
+          git push origin HEAD:fix/gate-0.3-followups-focusedvalue-4xx-shared-strip
+      - name: Cleanup bootstrap artifacts
+        run: |
+          set -euo pipefail
+          git checkout fix/gate-0.3-followups-focusedvalue-4xx-shared-strip
+          git pull origin fix/gate-0.3-followups-focusedvalue-4xx-shared-strip
+          rm -f scripts/gate03-followups.part*.b64 .github/workflows/gate03-followups-bootstrap.yml
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(gate-0.3): remove one-shot follow-ups bootstrap" || exit 0
+          git push origin HEAD:fix/gate-0.3-followups-focusedvalue-4xx-shared-strip
