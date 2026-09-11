@@ -6,6 +6,7 @@ import { AuthController } from './auth.controller';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { ClientResolverModule } from '../client-resolver/client-resolver.module';
 import { PrismaModule } from '../../common/prisma/prisma.module';
+import { getJwtSecret } from '../../common/auth/jwt-secret';
 
 @Module({
   imports: [
@@ -13,16 +14,13 @@ import { PrismaModule } from '../../common/prisma/prisma.module';
     ClientResolverModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
-      // async to satisfy the JwtModuleAsyncOptions type (union allows Promise or value); disable for no await
       // eslint-disable-next-line @typescript-eslint/require-await
-      useFactory: async (config: ConfigService) => ({
-        secret: config.get<string>(
-          'JWT_SECRET',
-          'dev-super-secret-change-in-real-env',
-        ),
+      useFactory: async (_config: ConfigService) => ({
+        // Fail-fast outside development when JWT_SECRET is missing (getJwtSecret).
+        secret: getJwtSecret(),
         signOptions: {
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-          expiresIn: config.get<string>('JWT_EXPIRES_IN', '7d') as any,
+          expiresIn: (_config.get<string>('JWT_EXPIRES_IN') || '7d') as any,
         },
       }),
       inject: [ConfigService],

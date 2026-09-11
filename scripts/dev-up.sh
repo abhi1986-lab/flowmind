@@ -2,7 +2,7 @@
 # FlowMind AI - local dev bootstrap
 #
 # Brings up Docker infra (Postgres control + client-a, Redis, MinIO),
-# migrates/seeds DBs, fixes host-local connection URLs, syncs demo client ID,
+# migrates/seeds DBs, sets CLIENT_A_DATABASE_URL for secret-ref resolution,
 # then starts API + web (desktop optional).
 #
 # Usage:
@@ -118,12 +118,15 @@ cat > apps/api-server/.env <<EOF
 DATABASE_URL=${CONTROL_URL_HOST}
 CONTROL_DATABASE_URL=${CONTROL_URL_HOST}
 CLIENT_DATABASE_URL=${CLIENT_URL_HOST}
+# Gate 0.2: resolve ClientRoute.db_connection_ref "client-a-db"
+CLIENT_A_DATABASE_URL=${CLIENT_URL_HOST}
 JWT_SECRET=dev-super-secret-change-in-real-env
 JWT_EXPIRES_IN=7d
 ALLOW_DEV_CLIENT_HEADER=true
+AI_PROVIDER=${AI_PROVIDER:-stub}
 PORT=${API_PORT}
 EOF
-ok "apps/api-server/.env"
+ok "apps/api-server/.env (includes CLIENT_A_DATABASE_URL for secret-ref resolution)"
 
 # --- prisma generate (control + client) + control migrate ---
 # Architecture: control schema has ZERO Session/Event/SOP/Workflow models.
@@ -148,11 +151,14 @@ log "Seeding control plane (acme client + platform admin)"
 )
 ok "Control plane seeded"
 
-# --- fix client route for host-run API ---
-log "Pointing client route at localhost:5433 (host-run API)"
-docker exec fm-postgres-control psql -U flowmind -d flowmind_control -v ON_ERROR_STOP=1 \
-  -c "UPDATE client_routes SET db_connection_ref = '${CLIENT_URL_HOST}';" >/dev/null
-ok "client_routes.db_connection_ref -> localhost:5433"
+# --- verify seed left secret refs (Gate 0.2) ---
+log "Verifying client_routes stores refs (not live postgres URLs)"
+REF_VAL="$(docker exec fm-postgres-control psql -U flowmind -d flowmind_control -tA \
+  -c "SELECT db_connection_ref FROM client_routes LIMIT 1;" | tr -d '[:space:]')"
+if [[ "$REF_VAL" == *"://*" ]]; then
+  die "client_routes.db_connection_ref still looks like a URL ($REF_VAL). Re-seed with Gate 0.2 seed."
+fi
+ok "db_connection_ref is secret ref: ${REF_VAL:-empty}"
 
 # --- client data-plane schema (ops models ONLY) ---
 log "Applying client data-plane schema (prisma db push --schema=client)"
@@ -163,19 +169,15 @@ log "Applying client data-plane schema (prisma db push --schema=client)"
 )
 ok "Client DB schema ready (ops only)"
 
-# --- sync demo auth clientId with seeded acme id ---
-log "Syncing demo login clientId with seeded acme client"
+# --- report seeded acme id (login looks it up live; no hardcoded UUID patch) ---
+log "Reading seeded acme client id (AuthService resolves at login time)"
 ACME_ID="$(docker exec fm-postgres-control psql -U flowmind -d flowmind_control -tA \
   -c "SELECT id FROM clients WHERE slug = 'acme' LIMIT 1;")"
 ACME_ID="$(echo "$ACME_ID" | tr -d '[:space:]')"
 if [[ -z "$ACME_ID" ]]; then
   die "Could not read acme client id from control DB"
 fi
-ok "acme client id = $ACME_ID"
-
-AUTH_FILE="apps/api-server/src/modules/auth/auth.service.ts"
-python3 "$ROOT/scripts/patch-auth-client-id.py" "$AUTH_FILE" "$ACME_ID"
-ok "auth.service.ts clientId synced"
+ok "acme client id = $ACME_ID (JWT client_id comes from live control lookup)"
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
@@ -208,7 +210,10 @@ if [[ "$START_APPS" -eq 1 ]]; then
     ALLOW_DEV_CLIENT_HEADER=true \
     CONTROL_DATABASE_URL="$CONTROL_URL_HOST" \
     DATABASE_URL="$CONTROL_URL_HOST" \
+    CLIENT_A_DATABASE_URL="$CLIENT_URL_HOST" \
+    CLIENT_DATABASE_URL="$CLIENT_URL_HOST" \
     JWT_SECRET=dev-super-secret-change-in-real-env \
+    AI_PROVIDER="${AI_PROVIDER:-stub}" \
     PORT="$API_PORT" \
     bash -c "cd '${ROOT}/apps/api-server' && node dist/main.js"
 

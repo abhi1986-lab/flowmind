@@ -30,13 +30,16 @@ model Client {
 }
 
 // Infrastructure routing for a client (the key isolation pointer)
+// Gate 0.2: db_connection_ref / ai_config_ref store SECRET REFS only
+// (e.g. "client-a-db", "client-a-ai") — never live Postgres URLs or AI API keys.
+// Runtime resolves refs via env (CLIENT_A_DATABASE_URL, etc.) / SECRET_REFS_JSON.
 model ClientRoute {
   id              String   @id @default(uuid())
   clientId        String   @map("client_id")
-  dbConnectionRef String   @map("db_connection_ref") // connection string or secret ref
-  s3BucketRef     String   @map("s3_bucket_ref")
+  dbConnectionRef String   @map("db_connection_ref") // secret ref, e.g. "client-a-db"
+  s3BucketRef     String   @map("s3_bucket_ref") // bucket name / ref (non-secret routing)
   vectorNamespace String   @map("vector_namespace")
-  aiConfigRef     String   @map("ai_config_ref")
+  aiConfigRef     String   @map("ai_config_ref") // secret ref, e.g. "client-a-ai"
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
