@@ -1,35 +1,25 @@
 import { Injectable, UnauthorizedException, Inject } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { ClientResolverService } from '../client-resolver/client-resolver.service';
+import { ControlPrismaService } from '../../common/prisma/control-prisma.service';
 import { JwtPayload, Role, PERMISSIONS } from '@flowmind/shared-types';
 
 @Injectable()
 export class AuthService {
   constructor(
     @Inject(JwtService) private readonly jwtService: JwtService,
-    @Inject(ClientResolverService)
-    private readonly clientResolver: ClientResolverService,
+    @Inject(ControlPrismaService)
+    private readonly controlPrisma: ControlPrismaService,
   ) {}
 
   /**
    * MVP Login
    *
-   * For foundation: supports the seeded "acme" client with a demo contributor.
-   * Real implementation (next phase):
-   *   - Use resolved client route to open per-client PrismaClient
-   *   - Lookup user by email inside client DB
-   *   - Verify password hash stored in client DB
-   *   - Return token with that user's actual role/permissions from client DB
-   *
-   * Login can be called with client context already resolved from subdomain/header.
+   * Gate 0.4: JWT client_id ALWAYS comes from the live control-plane Client row
+   * (no hardcoded UUID that can drift from / bypass resolver match).
    */
   async login(email: string, password: string, _clientSlugFromBody?: string) {
-    void _clientSlugFromBody; // mark as used for lint (future real lookup uses it)
-    // We use a dummy request-like object so resolver can extract slug from header or we pass it
-    // In practice, the HTTP request context is used by the resolver in guard, but for login we allow explicit or dev header.
+    void _clientSlugFromBody;
 
-    // For simplicity in MVP foundation, hardcode the acme client for demo users.
-    // Any real user provisioning happens inside the client DB.
     const demoUsers: Record<
       string,
       { password: string; role: Role; clientSlug: string }
@@ -53,35 +43,30 @@ export class AuthService {
         password: 'ChangeMe123!',
         role: 'CLIENT_ADMIN',
         clientSlug: 'acme',
-      }, // demo only
+      },
     };
 
     const demo = demoUsers[email.toLowerCase()];
     if (!demo || password !== demo.password) {
-      // In real: would also try client DB lookup here
       throw new UnauthorizedException('Invalid credentials');
     }
 
     const clientSlug = demo.clientSlug;
 
-    // For demo users in this validation run, hardcode the current acme client ID from fresh seed.
-    // Matches the client created by seed-control.ts so JWT client_id matches what ClientResolverGuard expects.
-    const resolved = {
-      clientId: '82b84d1d-1708-42cf-b9af-d175c1acc84d',
-      slug: clientSlug,
-      route: {
-        dbConnectionRef: '',
-        s3BucketRef: '',
-        vectorNamespace: '',
-        aiConfigRef: '',
-      },
-    };
+    const client = await this.controlPrisma.client.findUnique({
+      where: { slug: clientSlug },
+    });
+    if (!client || client.status !== 'active') {
+      throw new UnauthorizedException(
+        `Client '${clientSlug}' is not available for login.`,
+      );
+    }
 
     const permissions = PERMISSIONS[demo.role] || [];
 
     const payload: JwtPayload = {
-      sub: `demo-user-${email}`, // In real: the real user UUID from client DB
-      client_id: resolved.clientId,
+      sub: `demo-user-${email}`,
+      client_id: client.id,
       email,
       role: demo.role,
       permissions,
@@ -95,16 +80,13 @@ export class AuthService {
         id: payload.sub,
         email,
         role: demo.role,
-        clientId: resolved.clientId,
-        clientSlug: resolved.slug,
+        clientId: client.id,
+        clientSlug: client.slug,
         permissions,
       },
     };
   }
 
-  /**
-   * For /auth/me - returns the claims from validated token.
-   */
   getProfile(user: JwtPayload) {
     return {
       id: user.sub,
