@@ -6,6 +6,12 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
+    "prisma:generate:control": "prisma generate --schema=prisma/control/schema.prisma",
+    "prisma:generate:client": "prisma generate --schema=prisma/client/schema.prisma",
+    "prisma:generate": "npm run prisma:generate:control && npm run prisma:generate:client",
+    "prisma:migrate:control": "prisma migrate deploy --schema=prisma/control/schema.prisma",
+    "prisma:push:client": "prisma db push --schema=prisma/client/schema.prisma",
+    "prebuild": "npm run prisma:generate",
     "build": "rm -rf dist tsconfig.build.tsbuildinfo && npx tsc -p tsconfig.build.json",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "node dist/main.js",

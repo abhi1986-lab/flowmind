@@ -9,8 +9,10 @@ RUN npm ci --omit=dev || npm install --omit=dev
 # Copy source
 COPY . .
 
-# Generate prisma (control) at build if needed
-RUN npx prisma generate || true
+# Generate BOTH Prisma clients (control @prisma/client + client-data @prisma/client-data)
+RUN npx prisma generate --schema=prisma/control/schema.prisma \
+ && npx prisma generate --schema=prisma/client/schema.prisma \
+ || true
 
 # Build
 RUN npm run build

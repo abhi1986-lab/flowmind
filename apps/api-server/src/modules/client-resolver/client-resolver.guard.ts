@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@prisma/client-data';
 import { ClientResolverService } from './client-resolver.service';
 import { ClientPrismaFactory } from '../../common/prisma/client-prisma.factory';
 import type { JwtPayload, AccessScope } from '@flowmind/shared-types';
@@ -15,7 +15,8 @@ import type { JwtPayload, AccessScope } from '@flowmind/shared-types';
 export interface AuthenticatedRequest extends Request {
   user?: JwtPayload;
   accessScope?: AccessScope;
-  clientPrisma?: PrismaClient; // per-client data plane (sessions, events, etc.)
+  /** Per-client data-plane Prisma (ops models only; from @prisma/client-data). */
+  clientPrisma?: PrismaClient;
 }
 
 /**
