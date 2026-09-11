@@ -53,9 +53,9 @@ export interface CapturedEvent {
   windowTitle?: string;
   /**
    * Safe metadata. Never store raw keystreams.
-   * Declared text (`value` / `text` / `textPreview` / `note` and cousins) is ONLY allowed on
+   * Declared text (`value` / `text` / `textPreview` / `note` / `focusedValue` and cousins) is ONLY allowed on
    * TEXT_INPUT, PASTE_INPUT, or USER_NOTE — ingestion rejects these keys on APP_CHANGED etc.
-   * Passwords / secure fields must never appear.
+   * Passwords / secure fields must never appear. See event-metadata-policy.ts (shared strip/deny lists).
    */
   metadata?: Record<string, any>;
   note?: string; // for USER_NOTE
@@ -161,3 +161,16 @@ export interface ApiError {
     details?: any;
   };
 }
+
+// Gate 0.3 shared metadata policy (deny lists + strip helper)
+export {
+  TEXT_BEARING_EVENT_TYPES,
+  DECLARED_TEXT_METADATA_KEYS,
+  KEYLOGGING_METADATA_KEYS,
+  STRIP_ON_NON_TEXT_METADATA_KEYS,
+  isTextBearingEventType,
+  isDeclaredTextMetadataKey,
+  isKeyloggingMetadataKey,
+  stripDeclaredTextMetadata,
+} from './event-metadata-policy';
+export type { TextBearingEventType } from './event-metadata-policy';
