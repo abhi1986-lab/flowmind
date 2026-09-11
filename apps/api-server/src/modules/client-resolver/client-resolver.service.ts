@@ -5,9 +5,11 @@ import {
 } from '@nestjs/common';
 import { Request } from 'express';
 import { ControlPrismaService } from '../../common/prisma/control-prisma.service';
+import { SecretRefsService } from '../../common/secrets/secret-refs.service';
 import type { AccessScope, Role, Permission } from '@flowmind/shared-types';
 
-interface ClientRouteRef {
+/** Values stored on ClientRoute — secret refs, not live credentials. */
+export interface ClientRouteRef {
   dbConnectionRef: string;
   s3BucketRef: string;
   vectorNamespace: string;
@@ -18,7 +20,10 @@ const DEV_HEADER_ENABLED = process.env.ALLOW_DEV_CLIENT_HEADER === 'true';
 
 @Injectable()
 export class ClientResolverService {
-  constructor(private readonly controlPrisma: ControlPrismaService) {}
+  constructor(
+    private readonly controlPrisma: ControlPrismaService,
+    private readonly secretRefs: SecretRefsService,
+  ) {}
 
   /**
    * Resolves the client identity for the current request.
@@ -102,6 +107,24 @@ export class ClientResolverService {
   }
 
   /**
+   * Resolve ClientRoute refs to runtime connection/config values.
+   * Control DB holds refs only; secrets come from env / SECRET_REFS_JSON.
+   */
+  resolveRouteSecrets(route: ClientRouteRef): {
+    clientDbUrl: string;
+    storageBucket: string;
+    vectorNamespace: string;
+    aiConfig: Record<string, unknown>;
+  } {
+    return {
+      clientDbUrl: this.secretRefs.resolveDbUrl(route.dbConnectionRef),
+      storageBucket: route.s3BucketRef,
+      vectorNamespace: route.vectorNamespace,
+      aiConfig: this.secretRefs.resolveAiConfig(route.aiConfigRef),
+    };
+  }
+
+  /**
    * Builds the AccessScope object after full validation (auth + client match).
    * This object is what all downstream services/repositories receive.
    */
@@ -114,30 +137,17 @@ export class ClientResolverService {
     route: ClientRouteRef;
   }): AccessScope {
     const { actorUserId, clientId, role, permissions, route } = params;
-
-    // Parse aiConfigRef safely
-    let aiConfig: Record<string, unknown> = {};
-    try {
-      const parsed: unknown = route.aiConfigRef
-        ? JSON.parse(route.aiConfigRef)
-        : {};
-      aiConfig = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<
-        string,
-        unknown
-      >;
-    } catch {
-      aiConfig = {};
-    }
+    const resolved = this.resolveRouteSecrets(route);
 
     return {
       actorUserId,
       clientId,
       role: role as Role,
       permissions: permissions as Permission[],
-      clientDbUrl: route.dbConnectionRef,
-      storageBucket: route.s3BucketRef,
-      vectorNamespace: route.vectorNamespace,
-      aiConfig,
+      clientDbUrl: resolved.clientDbUrl,
+      storageBucket: resolved.storageBucket,
+      vectorNamespace: resolved.vectorNamespace,
+      aiConfig: resolved.aiConfig,
     };
   }
 }
