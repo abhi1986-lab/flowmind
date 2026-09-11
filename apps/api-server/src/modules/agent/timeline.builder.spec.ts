@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TimelineBuilder } from './timeline.builder';
-import { Event } from '@prisma/client';
+import { Event } from '@prisma/client-data';
 
 describe('TimelineBuilder', () => {
   let builder: TimelineBuilder;
@@ -15,6 +15,23 @@ describe('TimelineBuilder', () => {
 
   it('should be defined', () => {
     expect(builder).toBeDefined();
+  });
+
+  it('imports Event from @prisma/client-data (schema-split build contract)', () => {
+    // Build-oriented: control @prisma/client has no Event after schema split.
+    // This file's import + a typed Event payload must compile and run.
+    const events: Partial<Event>[] = [
+      {
+        id: 'e-client-data',
+        sequenceNo: 1,
+        eventType: 'USER_NOTE',
+        appName: 'Notes',
+        metadata: { note: 'client-data Event import ok' },
+      },
+    ];
+    const steps = builder.buildTimeline(events as Event[]);
+    expect(steps).toHaveLength(1);
+    expect(steps[0].action || steps[0].description).toContain('client-data Event import ok');
   });
 
   it('should return empty array for no events', () => {
