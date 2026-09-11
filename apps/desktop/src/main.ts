@@ -696,22 +696,36 @@ function createWindow() {
         .recording{background:#b91c1c;color:white}
         .idle{background:#334155}
         .loggedin{background:#166534;color:white}
+        .stopped{background:#1e3a5f;color:#bfdbfe}
         button{margin:4px;padding:6px 10px;cursor:pointer}
+        button:disabled{opacity:0.45;cursor:not-allowed}
         .section{margin:12px 0;padding:8px;border:1px solid #334155;border-radius:4px}
-        .log{white-space:pre-wrap;font-family:monospace;font-size:11px;background:#1e2937;padding:6px;margin-top:4px;max-height:100px;overflow:auto}
+        .log{white-space:pre-wrap;font-family:monospace;font-size:11px;background:#1e2937;padding:6px;margin-top:4px;max-height:120px;overflow:auto;border-radius:4px}
         input{padding:4px;margin:2px;width:min(100%,280px)}
         .hint{margin-top:12px;font-size:11px;opacity:0.8;line-height:1.45}
         code{background:#1e2937;padding:1px 4px;border-radius:3px}
+        #recBanner{display:none;padding:12px 14px;border-radius:6px;margin:8px 0;font-weight:700;font-size:15px;letter-spacing:0.02em}
+        #recBanner.on{display:block;background:#b91c1c;color:#fff;box-shadow:0 0 0 2px #fecaca inset}
+        #consentStrip{display:none;padding:8px 12px;border-radius:4px;margin:6px 0;background:#7f1d1d;color:#fee2e2;font-size:12px;font-weight:600}
+        #consentStrip.on{display:block}
+        #error{display:none;color:#fecaca;background:#7f1d1d;border:1px solid #ef4444;border-radius:6px;padding:10px 12px;margin:8px 0;min-height:1.2em;font-weight:700;white-space:pre-wrap;word-break:break-word}
+        #error.on{display:block}
+        .spine{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
+        .spine span{padding:4px 8px;border-radius:999px;background:#1e2937;border:1px solid #334155;font-size:11px;opacity:0.7}
+        .spine span.done{opacity:1;border-color:#22c55e;color:#bbf7d0}
+        .spine span.next{opacity:1;border-color:#38bdf8;color:#e0f2fe;background:#0c4a6e;font-weight:700}
       </style>
       </head>
       <body>
         <h1>FlowMind — Activity Capture v3</h1>
         <div id="loginStatus" class="status idle">Not logged in</div>
         <button id="loginBtn">Login (demo contributor@acme.test)</button>
+        <div id="recBanner">● RECORDING — capture active (visible consent)</div>
+        <div id="consentStrip">Visible consent: recording is ON. Only apps/URLs/clicks/keys (Tab/Enter/Esc) + optional committed text. Stop anytime.</div>
 
         <div class="section">
           <div>Session: <span id="sessionId">-</span></div>
-          <div>Status: <span id="sessionStatus">IDLE</span></div>
+          <div>Status: <span id="sessionStatus" class="status idle">IDLE</span></div>
           <div>Events sent: <span id="eventCount">0</span></div>
           <div>Last captured: <span id="lastCaptured">-</span></div>
           <label style="display:flex;gap:8px;align-items:flex-start;margin:10px 0;cursor:pointer">
@@ -733,6 +747,16 @@ function createWindow() {
         </div>
 
         <div class="section">
+          <strong>Demo spine (camera path)</strong>
+          <div class="spine" id="spineSteps">
+            <span data-step="1">1 Login</span>
+            <span data-step="2">2 Create</span>
+            <span data-step="3">3 Start</span>
+            <span data-step="4">4 Stop</span>
+            <span data-step="5">5 Build Timeline</span>
+            <span data-step="6">6 Generate SOP Draft</span>
+            <span data-step="7">7 Open Viewer</span>
+          </div>
           <strong>SOP:</strong>
           <button id="timelineBtn" disabled>Build Timeline</button>
           <button id="sopBtn" disabled>Generate SOP Draft</button>
@@ -740,32 +764,93 @@ function createWindow() {
         </div>
 
         <div>Last API response: <div id="lastResponse" class="log">-</div></div>
-        <div id="error" style="color:#f87171;min-height:1em;font-weight:bold"></div>
+        <div id="error"></div>
 
         <p class="hint">
-          <b>Visible consent:</b> recording only runs after you click <b>Start Session</b>. Stop anytime.<br/><br/>
+          <b>Visible consent:</b> recording only runs after you click <b>Start Session</b>. Stop anytime. A red banner stays on while capture is active.<br/><br/>
           <b>Captures:</b> apps, URLs, clicks, Tab/Enter/Esc,
           and (if Intent on) <b>committed text + pastes</b> for SOP context.<br/><br/>
           This is <b>not keylogging</b>: we never store per-key events; only snapshots on commit/paste.
           Declared text only on TEXT_INPUT / PASTE_INPUT / USER_NOTE (Gate 0.3).<br/><br/>
-          Grant <b>Accessibility</b> + <b>Input Monitoring</b>. FlowMind’s window is ignored.<br/><br/>
-          Demo spine: Record → Stop → Build Timeline → Generate SOP Draft → Open Viewer (human approve).
+          Grant <b>Accessibility</b> + <b>Input Monitoring</b>. FlowMind’s window is ignored.
         </p>
 
         <script>
           let token = null;
+          let loginEmail = null;
           let currentSessionId = null;
           let eventCount = 0;
           let isRecording = false;
+          let timelineBuilt = false;
+          let sopDraftReady = false;
+          let startedOnce = false;
 
           const $ = (id) => document.getElementById(id);
+                    function statusLabel() {
+            if (isRecording) return 'RECORDING';
+            if (currentSessionId) return 'STOPPED';
+            return 'IDLE';
+          }
+          function updateSpine() {
+            const loggedIn = !!token;
+            const created = !!currentSessionId;
+            const stopped = created && !isRecording;
+            let highlight = 1;
+            if (!loggedIn) highlight = 1;
+            else if (!created) highlight = 2;
+            else if (isRecording) highlight = 4;
+            else if (!stopped) highlight = 3;
+            else if (!timelineBuilt) highlight = 5;
+            else if (!sopDraftReady) highlight = 6;
+            else highlight = 7;
+            // created + not recording before first start is still IDLE in updateUI only when no session — after create we set STOPPED? No: create sets isRecording=false and sessionId set, updateUI marks STOPPED.
+            // Demo UX: after Create, next is Start. Treat STOPPED with 0 events and no timeline as "ready to start" only if never started — we use a startedOnce flag.
+            document.querySelectorAll('#spineSteps span').forEach((el) => {
+              const n = Number(el.getAttribute('data-step'));
+              el.classList.remove('done', 'next');
+              if (n === 1 && loggedIn) el.classList.add('done');
+              if (n === 2 && created) el.classList.add('done');
+              if (n === 3 && startedOnce) el.classList.add('done');
+              if (n === 4 && startedOnce && !isRecording) el.classList.add('done');
+              if (n === 5 && timelineBuilt) el.classList.add('done');
+              if (n === 6 && sopDraftReady) el.classList.add('done');
+            });
+            if (!loggedIn) highlight = 1;
+            else if (!created) highlight = 2;
+            else if (!startedOnce) highlight = 3;
+            else if (isRecording) highlight = 4;
+            else if (!timelineBuilt) highlight = 5;
+            else if (!sopDraftReady) highlight = 6;
+            else highlight = 7;
+            const el = document.querySelector('#spineSteps span[data-step="' + highlight + '"]');
+            if (el) el.classList.add('next');
+          }
           function updateUI() {
             $('sessionId').textContent = currentSessionId || '-';
-            $('sessionStatus').textContent = isRecording ? 'RECORDING' : (currentSessionId ? 'STOPPED' : 'IDLE');
+            const statusEl = $('sessionStatus');
+            if (isRecording) {
+              statusEl.textContent = 'RECORDING — capture active';
+              statusEl.className = 'status recording';
+            } else if (currentSessionId && startedOnce) {
+              statusEl.textContent = 'STOPPED';
+              statusEl.className = 'status stopped';
+            } else if (currentSessionId) {
+              statusEl.textContent = 'CREATED — ready to start';
+              statusEl.className = 'status idle';
+            } else {
+              statusEl.textContent = 'IDLE';
+              statusEl.className = 'status idle';
+            }
             $('eventCount').textContent = eventCount;
             const loggedIn = !!token;
-            $('loginStatus').textContent = loggedIn ? 'Logged in' : 'Not logged in';
+            $('loginStatus').textContent = loggedIn
+              ? ('Logged in as ' + (loginEmail || 'contributor@acme.test'))
+              : 'Not logged in';
             $('loginStatus').className = 'status ' + (loggedIn ? 'loggedin' : 'idle');
+            $('loginBtn').disabled = loggedIn;
+            $('loginBtn').textContent = loggedIn ? 'Logged in (demo)' : 'Login (demo contributor@acme.test)';
+            $('recBanner').className = isRecording ? 'on' : '';
+            $('consentStrip').className = isRecording ? 'on' : '';
             const can = loggedIn && !!currentSessionId;
             $('startBtn').disabled = !can || isRecording;
             $('stopBtn').disabled = !can || !isRecording;
@@ -776,13 +861,18 @@ function createWindow() {
             $('timelineBtn').disabled = !after;
             $('sopBtn').disabled = !after;
             $('viewerBtn').disabled = !after;
+            updateSpine();
           }
           function showResponse(data) {
             $('lastResponse').textContent = JSON.stringify(data, null, 2);
-            $('error').textContent = '';
+            const err = $('error');
+            err.textContent = '';
+            err.className = '';
           }
           function showError(msg) {
-            $('error').textContent = msg;
+            const err = $('error');
+            err.textContent = String(msg || 'Unknown error');
+            err.className = 'on';
             console.error(msg);
           }
           async function apiCall(method, path, body = null) {
@@ -800,15 +890,20 @@ function createWindow() {
               const data = await apiCall('POST', '/auth/login', {
                 email: 'contributor@acme.test', password: 'demo123'
               });
-              if (data.accessToken) { token = data.accessToken; updateUI(); }
-              else showError('No accessToken');
+              if (data.accessToken) {
+                token = data.accessToken;
+                loginEmail = (data.user && data.user.email) || 'contributor@acme.test';
+                updateUI();
+              } else showError('No accessToken');
             } catch (e) { showError(e.message || e); }
           };
           $('createBtn').onclick = async () => {
             try {
               const data = await apiCall('POST', '/agent/sessions', {});
               currentSessionId = data.sessionId;
-              isRecording = false; eventCount = 0; updateUI();
+              isRecording = false; eventCount = 0;
+              timelineBuilt = false; sopDraftReady = false; startedOnce = false;
+              updateUI();
             } catch (e) { showError(e.message || e); }
           };
           $('intentToggle').onchange = () => {
@@ -828,7 +923,7 @@ function createWindow() {
                 window.flowmind.setIntentCapture(!!$('intentToggle').checked);
               }
               await apiCall('POST', '/agent/sessions/' + currentSessionId + '/start');
-              isRecording = true; updateUI();
+              isRecording = true; startedOnce = true; updateUI();
               window.flowmind.startRecording(currentSessionId);
               showResponse({
                 message: $('intentToggle').checked
@@ -873,6 +968,8 @@ function createWindow() {
               const data = await apiCall('POST', '/agent/sessions/' + currentSessionId + '/build-timeline');
               if (!data.persisted || !data.workflowId) {
                 showError('Timeline was not persisted — check API / client DB');
+              } else {
+                timelineBuilt = true; updateUI();
               }
             } catch (e) { showError(e.message || e); }
           };
@@ -882,6 +979,8 @@ function createWindow() {
               const data = await apiCall('POST', '/agent/sessions/' + currentSessionId + '/generate-sop-draft');
               if (data.status !== 'DRAFT' || !data.sopDocumentId) {
                 showError('SOP DRAFT was not persisted — human approve path needs a draft id');
+              } else {
+                timelineBuilt = true; sopDraftReady = true; updateUI();
               }
             } catch (e) { showError(e.message || e); }
           };
@@ -936,9 +1035,20 @@ function createWindow() {
             window.flowmind.onCaptureTip((tip) => {
               const err = $('error');
               if (err) {
-                err.style.color = '#fbbf24';
+                err.style.background = '#78350f';
+                err.style.borderColor = '#fbbf24';
+                err.style.color = '#fef3c7';
                 err.textContent = tip && tip.message ? tip.message : '';
-                setTimeout(() => { if (err.textContent === (tip && tip.message)) err.textContent = ''; }, 8000);
+                err.className = tip && tip.message ? 'on' : '';
+                setTimeout(() => {
+                  if (err.textContent === (tip && tip.message)) {
+                    err.textContent = '';
+                    err.className = '';
+                    err.style.background = '';
+                    err.style.borderColor = '';
+                    err.style.color = '';
+                  }
+                }, 8000);
               }
               // Focus note field so user can type intent quickly
               try { $('noteInput').focus(); } catch (e) {}

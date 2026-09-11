@@ -75,6 +75,43 @@ function statusClass(status?: string) {
   return STATUS_STYLES[status] || STATUS_STYLES.DRAFT;
 }
 
+const REVIEW_STEPS = ['DRAFT', 'IN_REVIEW', 'APPROVED'] as const;
+
+function ReviewStepper({ status }: { status?: string }) {
+  const current = status || 'DRAFT';
+  const idx = REVIEW_STEPS.indexOf(current as (typeof REVIEW_STEPS)[number]);
+  const activeIdx = current === 'REJECTED' ? -1 : idx < 0 ? 0 : idx;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs" aria-label="SOP review path">
+      {REVIEW_STEPS.map((step, i) => {
+        const done = activeIdx > i;
+        const here = activeIdx === i;
+        return (
+          <div key={step} className="flex items-center gap-1.5">
+            {i > 0 && <span className="text-slate-300">→</span>}
+            <span
+              className={`rounded-full px-2.5 py-1 font-semibold ring-1 ring-inset ${
+                here
+                  ? statusClass(step)
+                  : done
+                    ? 'bg-emerald-50 text-emerald-700 ring-emerald-100'
+                    : 'bg-slate-50 text-slate-400 ring-slate-200'
+              }`}
+            >
+              {step.replace('_', ' ')}
+            </span>
+          </div>
+        );
+      })}
+      {current === 'REJECTED' && (
+        <span className={`ml-1 rounded-full px-2.5 py-1 font-semibold ring-1 ring-inset ${statusClass('REJECTED')}`}>
+          REJECTED
+        </span>
+      )}
+    </div>
+  );
+}
+
 function emptySop(): SopContent {
   return {
     title: '',
@@ -588,6 +625,7 @@ export default function SopViewerPage() {
                   Session {sop?.sessionId || sessionId}
                   {sop?.sopDocumentId ? ` · SOP ${sop.sopDocumentId.slice(0, 8)}…` : ''}
                 </p>
+                {sop?.status && <ReviewStepper status={sop.status} />}
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -723,7 +761,8 @@ export default function SopViewerPage() {
                 {/* Side panel: actions */}
                 <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
                   <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <h3 className="mb-3 text-sm font-semibold text-slate-900">Save &amp; review</h3>
+                    <h3 className="mb-1 text-sm font-semibold text-slate-900">Save &amp; review</h3>
+                    <p className="mb-3 text-xs text-slate-500">Demo path: Save → Submit for review → Approve</p>
                     <button
                       type="button"
                       disabled={isLoading || !canEdit}
@@ -806,17 +845,17 @@ export default function SopViewerPage() {
                 {!timeline?.steps?.length ? (
                   <p className="text-sm text-slate-500">No timeline steps for this session.</p>
                 ) : (
-                  <ol className="relative space-y-0 border-l-2 border-indigo-100 pl-6">
+                  <ol className="relative space-y-0 border-l-2 border-indigo-200 pl-6">
                     {timeline.steps.map((step, i) => (
                       <li key={i} className="relative pb-6 last:pb-0">
-                        <span className="absolute -left-[1.9rem] flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-[11px] font-bold text-white">
+                        <span className="absolute -left-[1.9rem] flex h-7 w-7 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white shadow-sm">
                           {step.stepNo || i + 1}
                         </span>
-                        <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3">
+                        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm">
                           <div className="text-sm font-semibold text-slate-900">
                             {step.title || `Step ${step.stepNo || i + 1}`}
                           </div>
-                          <p className="mt-1 text-sm leading-relaxed text-slate-700">
+                          <p className="mt-1.5 text-[15px] leading-relaxed text-slate-800">
                             {step.action || step.description}
                           </p>
                         </div>
