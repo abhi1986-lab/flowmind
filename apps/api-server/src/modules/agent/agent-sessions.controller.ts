@@ -13,6 +13,7 @@ import { ClientResolverGuard } from '../client-resolver/client-resolver.guard';
 import type { AuthenticatedRequest } from '../client-resolver/client-resolver.guard';
 import { TimelineBuilder, type WorkflowStep } from './timeline.builder';
 import { SopDraftGenerator } from './sop.generator';
+import { sanitizeEventBatch } from './event-metadata.sanitizer';
 import { AIConfig } from '@flowmind/ai-providers';
 import type { Prisma } from '@prisma/client-data';
 
@@ -130,36 +131,8 @@ export class AgentSessionsController {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
     const sessionId = body.sessionId;
-    const events = body.events || [];
-
-    // Reject keylogging streams. Allow opt-in TEXT_INPUT/PASTE_INPUT metadata.text (on-commit, not keystream).
-    for (const e of events) {
-      const meta = (e['metadata'] as Record<string, unknown> | undefined) || {};
-      const type = String(e['eventType'] || '');
-      if (
-        e['typedText'] !== undefined ||
-        e['rawKeystrokes'] !== undefined ||
-        meta['typedText'] !== undefined ||
-        meta['keystrokes'] !== undefined ||
-        meta['raw'] !== undefined ||
-        meta['keyStream'] !== undefined
-      ) {
-        throw new Error(
-          'Forbidden: keylogging fields (typedText/keystrokes/raw) are not allowed.',
-        );
-      }
-      // text content only on explicit context event types
-      if (
-        meta['text'] !== undefined &&
-        type !== 'TEXT_INPUT' &&
-        type !== 'PASTE_INPUT' &&
-        type !== 'USER_NOTE'
-      ) {
-        throw new Error(
-          'Forbidden: metadata.text is only allowed on TEXT_INPUT, PASTE_INPUT, or USER_NOTE events.',
-        );
-      }
-    }
+    // Gate 0.3: reject metadata.value (+ cousins) except TEXT_INPUT/PASTE_INPUT/USER_NOTE
+    const events = sanitizeEventBatch(body.events || []);
 
     if (sessionId && events.length > 0) {
       // Basic batch insert for backbone

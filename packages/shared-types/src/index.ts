@@ -53,7 +53,8 @@ export interface CapturedEvent {
   windowTitle?: string;
   /**
    * Safe metadata. Never store raw keystreams.
-   * TEXT_INPUT/PASTE_INPUT may include truncated `text` / `textPreview` when intent capture is on.
+   * Declared text (`value` / `text` / `textPreview` / `note` and cousins) is ONLY allowed on
+   * TEXT_INPUT, PASTE_INPUT, or USER_NOTE — ingestion rejects these keys on APP_CHANGED etc.
    * Passwords / secure fields must never appear.
    */
   metadata?: Record<string, any>;

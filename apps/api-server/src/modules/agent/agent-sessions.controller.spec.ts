@@ -36,6 +36,7 @@ describe('AgentSessionsController', () => {
         findMany: jest.fn().mockResolvedValue([
           { id: 'e1', sequenceNo: 1, eventType: 'APP_CHANGED', appName: 'Test', windowTitle: 'Win' },
         ]),
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       workflow: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -101,5 +102,52 @@ describe('AgentSessionsController', () => {
 
     const stopRes = await controller.stopSession('sess1', mockReq as any);
     expect(stopRes.status).toBe('STOPPED');
+  });
+
+  it('uploadEvents rejects metadata.value on APP_CHANGED (Gate 0.3)', async () => {
+    await expect(
+      controller.uploadEvents(mockReq as any, {
+        sessionId: 'sess1',
+        events: [
+          {
+            sequenceNo: 1,
+            eventType: 'APP_CHANGED',
+            metadata: { value: 'smuggled keystrokes' },
+          },
+        ],
+      }),
+    ).rejects.toThrow(/metadata\.value/);
+    expect(mockReq.clientPrisma.event.createMany).not.toHaveBeenCalled();
+  });
+
+  it('uploadEvents allows TEXT_INPUT / PASTE_INPUT / USER_NOTE declared text', async () => {
+    const res = await controller.uploadEvents(mockReq as any, {
+      sessionId: 'sess1',
+      events: [
+        {
+          sequenceNo: 1,
+          eventType: 'TEXT_INPUT',
+          metadata: { text: 'hello intent' },
+        },
+        {
+          sequenceNo: 2,
+          eventType: 'PASTE_INPUT',
+          metadata: { value: 'pasted' },
+        },
+        {
+          sequenceNo: 3,
+          eventType: 'USER_NOTE',
+          metadata: { note: 'operator note' },
+        },
+        {
+          sequenceNo: 4,
+          eventType: 'APP_CHANGED',
+          metadata: { url: 'https://ok.example', actionHint: 'open' },
+        },
+      ],
+    });
+    expect(res.status).toBe('ACCEPTED');
+    expect(res.received).toBe(4);
+    expect(mockReq.clientPrisma.event.createMany).toHaveBeenCalled();
   });
 });

@@ -568,6 +568,27 @@ function buildActionHint(s: {
   return parts.join('; ');
 }
 
+/** Gate 0.3: declared text only on these event types (server also enforces). */
+const TEXT_BEARING_EVENT_TYPES = new Set(['TEXT_INPUT', 'PASTE_INPUT', 'USER_NOTE']);
+const DECLARED_TEXT_META_KEYS = new Set([
+  'value',
+  'text',
+  'textPreview',
+  'note',
+  'content',
+  'clipboard',
+  'clipboardText',
+  'paste',
+  'fieldValue',
+  'inputValue',
+  'typedValue',
+  'typedText',
+  'keystrokes',
+  'raw',
+  'keyStream',
+  'rawKeystrokes',
+]);
+
 function snapToPayload(
   snap: UiSnapshot,
   eventType: string,
@@ -585,7 +606,10 @@ function snapToPayload(
     metadata.focusedElement = snap.focusedRole;
   }
   if (snap.focusedDescription) metadata.focusedDescription = snap.focusedDescription;
-  if (snap.focusedValue) metadata.value = snap.focusedValue;
+  // Gate 0.3: never put field contents on APP_CHANGED / UI_ACTION / etc.
+  if (snap.focusedValue && TEXT_BEARING_EVENT_TYPES.has(eventType)) {
+    metadata.value = snap.focusedValue;
+  }
   if (snap.focusPath) metadata.focusPath = snap.focusPath;
   if (snap.selection) metadata.selection = snap.selection;
   if (snap.actionHint) metadata.actionHint = snap.actionHint;
@@ -602,7 +626,8 @@ function snapToPayload(
     focusedName: snap.focusedName,
     focusedElement: snap.focusedName || snap.focusedRole,
     focusedDescription: snap.focusedDescription,
-    focusedValue: snap.focusedValue,
+    // Do not forward focusedValue on non-text events (renderer must not re-attach as metadata.value)
+    focusedValue: TEXT_BEARING_EVENT_TYPES.has(eventType) ? snap.focusedValue : undefined,
     focusPath: snap.focusPath,
     selection: snap.selection,
     actionHint: snap.actionHint,
@@ -850,13 +875,25 @@ function createWindow() {
 
           window.flowmind.onActiveWindowChanged((data) => {
             if (!isRecording || !currentSessionId) return;
+            const TEXT_BEARING = { TEXT_INPUT:1, PASTE_INPUT:1, USER_NOTE:1 };
+            const DECLARED_TEXT = {
+              value:1, text:1, textPreview:1, note:1, content:1, clipboard:1, clipboardText:1,
+              paste:1, fieldValue:1, inputValue:1, typedValue:1, typedText:1, keystrokes:1,
+              raw:1, keyStream:1, rawKeystrokes:1
+            };
             const metadata = Object.assign({}, data.metadata || {});
             ['url','pageTitle','document','focusedRole','focusedName','focusedElement',
-             'focusedDescription','value','focusPath','selection','actionHint','action',
-             'text','textPreview','captureMode'].forEach((k) => {
+             'focusedDescription','focusPath','selection','actionHint','action',
+             'captureMode'].forEach((k) => {
               if (data[k] && !metadata[k]) metadata[k] = data[k];
             });
-            if (data.focusedValue && !metadata.value) metadata.value = data.focusedValue;
+            // Gate 0.3: declared text only on TEXT_INPUT / PASTE_INPUT / USER_NOTE
+            if (TEXT_BEARING[data.eventType]) {
+              ['value','text','textPreview','note'].forEach((k) => {
+                if (data[k] && !metadata[k]) metadata[k] = data[k];
+              });
+              if (data.focusedValue && !metadata.value) metadata.value = data.focusedValue;
+            }
             if (data.metadata) {
               Object.keys(data.metadata).forEach((k) => {
                 if (data.metadata[k] != null && metadata[k] == null) metadata[k] = data.metadata[k];
@@ -864,6 +901,7 @@ function createWindow() {
             }
             Object.keys(metadata).forEach((k) => {
               if (metadata[k] == null || metadata[k] === '' || metadata[k] === 'missing value') delete metadata[k];
+              if (!TEXT_BEARING[data.eventType] && DECLARED_TEXT[k]) delete metadata[k];
             });
             const eventObj = {
               sequenceNo: eventCount + 1,
