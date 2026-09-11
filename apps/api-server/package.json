@@ -22,10 +22,13 @@
     "lint": "eslint \"src/**/*.ts\" --ignore-pattern \"**/*.spec.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:cov": "jest --coverage",
+    "test:cov": "jest --coverage --coverageReporters=text --coverageReporters=json-summary --coverageReporters=lcov",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "test:integration": "jest --config ./test/jest-e2e.json --testPathPatterns=integration-spec"
+    "test:integration": "jest --config ./test/jest-e2e.json --testPathPatterns=integration-spec",
+    "test:cov:gate03": "jest --coverage --collectCoverageFrom=\"modules/agent/event-metadata.sanitizer.ts\" --coveragePathIgnorePatterns=\"\\.spec\\.ts$\" --coverageReporters=text --coverageReporters=json-summary",
+    "test:cov:check": "npm run test:cov && node -e \"const s=require('./coverage/coverage-summary.json').total; const pct=s.lines.pct; console.log('OVERALL_LINES='+pct); if(pct<75){console.error('Overall lines coverage '+pct+'% < 75%'); process.exit(1)}\"",
+    "test:cov:gate03:check": "npm run test:cov:gate03 && node -e \"const s=require('./coverage/coverage-summary.json').total; const pct=s.lines.pct; console.log('PR_SURFACE_LINES='+pct); if(pct<80){console.error('PR-surface lines coverage '+pct+'% < 80%'); process.exit(1)}\""
   },
   "dependencies": {
     "@flowmind/ai-providers": "*",
@@ -85,9 +88,19 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.(t|j)s",
+      "!**/*.spec.ts",
+      "!**/main.ts",
+      "!**/*.module.ts",
+      "!common/prisma/control-prisma.service.ts",
+      "!modules/agent/agent-sessions.controller.ts"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "moduleNameMapper": {
+      "^@flowmind/shared-types$": "<rootDir>/../../../packages/shared-types/src/index.ts",
+      "^@flowmind/ai-providers$": "<rootDir>/../../../packages/ai-providers/src/index.ts",
+      "^@flowmind/ai-providers/(.*)$": "<rootDir>/../../../packages/ai-providers/src/$1"
+    }
   }
 }
