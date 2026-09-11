@@ -14,14 +14,14 @@ import type { AuthenticatedRequest } from '../client-resolver/client-resolver.gu
 import { TimelineBuilder, type WorkflowStep } from './timeline.builder';
 import { SopDraftGenerator } from './sop.generator';
 import { AIConfig } from '@flowmind/ai-providers';
-import type { Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client-data';
 
 /**
  * Agent-facing endpoints (MVP).
  * All protected by JwtAuthGuard + ClientResolverGuard (the isolation boundary).
  *
- * These are stubs at foundation stage. Real logic (validation, storage to client DB,
- * artifact pre-signed URLs, etc.) comes after desktop agent + ingestion phases.
+ * Client ops persistence uses req.clientPrisma (@prisma/client-data) only.
+ * Control plane models are not reachable from this client.
  */
 @Controller('agent')
 @UseGuards(JwtAuthGuard, ClientResolverGuard)
