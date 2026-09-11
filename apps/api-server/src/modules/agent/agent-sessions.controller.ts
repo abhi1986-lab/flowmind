@@ -1,7 +1,11 @@
 import {
+  BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
+  InternalServerErrorException,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -166,22 +170,21 @@ export class AgentSessionsController {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
 
+    // M1 spine: require a real client-DB session before timeline persistence
+    const session = await clientPrisma.session.findUnique({ where: { id: sessionId } });
+    if (!session) {
+      throw new NotFoundException(`Session ${sessionId} not found`);
+    }
+
     const events = await clientPrisma.event.findMany({
       where: { sessionId },
       orderBy: { sequenceNo: 'asc' },
     });
 
-    const steps = this.timelineBuilder
-      ? this.timelineBuilder.buildTimeline(events)
-      : events.map((e, i) => ({
-          stepNo: i + 1,
-          title: `${e.eventType || 'EVENT'} in ${e.appName || 'app'}`,
-          description: e.windowTitle || e.appName || 'Unknown window',
-          eventRefs: [e.id],
-        }));
+    const steps = this.timelineBuilder.buildTimeline(events);
 
-    // Store or upsert workflow draft in client DB (unique on sourceSessionId)
-    let workflow: { id: string } | null = null;
+    // Fail hard — demo path needs Workflow persisted in client data plane
+    let workflow: { id: string };
     try {
       workflow = await clientPrisma.workflow.upsert({
         where: { sourceSessionId: sessionId },
@@ -197,16 +200,18 @@ export class AgentSessionsController {
       });
     } catch (err) {
       console.error('[AgentSessionsController] workflow upsert failed for session', sessionId, err);
-      // still return steps so caller sees progress; persistence is best-effort for now
+      throw new InternalServerErrorException(
+        `Failed to persist timeline for session ${sessionId}`,
+      );
     }
 
     return {
-      workflowId: workflow?.id,
+      workflowId: workflow.id,
       sessionId,
       stepCount: steps.length,
       steps,
       clientId: scope?.clientId,
-      persisted: !!workflow,
+      persisted: true,
     };
   }
 
@@ -218,26 +223,24 @@ export class AgentSessionsController {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
 
-    // Get or build the workflow for this session
+    const session = await clientPrisma.session.findUnique({ where: { id: sessionId } });
+    if (!session) {
+      throw new NotFoundException(`Session ${sessionId} not found`);
+    }
+
+    // Get or build the workflow for this session (client data plane only)
     let workflow = await clientPrisma.workflow.findFirst({
       where: { sourceSessionId: sessionId },
     });
 
     let stepsForSop: WorkflowStep[] = [];
     if (!workflow) {
-      // Auto-build timeline if not present (for lean validation flow)
+      // Auto-build timeline if not present (lean demo path)
       const events = await clientPrisma.event.findMany({
         where: { sessionId },
         orderBy: { sequenceNo: 'asc' },
       });
-      stepsForSop = this.timelineBuilder
-      ? this.timelineBuilder.buildTimeline(events)
-      : events.map((e, i) => ({
-          stepNo: i + 1,
-          title: `${e.eventType || 'EVENT'} in ${e.appName || 'app'}`,
-          description: e.windowTitle || e.appName || 'Unknown window',
-          eventRefs: [e.id],
-        }));
+      stepsForSop = this.timelineBuilder.buildTimeline(events);
 
       try {
         workflow = await clientPrisma.workflow.create({
@@ -249,15 +252,17 @@ export class AgentSessionsController {
         });
       } catch (err) {
         console.error('[AgentSessionsController] auto workflow create failed for', sessionId, err);
-        // proceed with in-memory stepsForSop for SOP content return
+        throw new InternalServerErrorException(
+          `Failed to persist timeline before SOP draft for session ${sessionId}`,
+        );
       }
     } else {
       stepsForSop = (workflow.steps as unknown as WorkflowStep[]) || [];
     }
 
     const steps = stepsForSop;
-    const wfTitle = workflow?.title || `Workflow from session ${sessionId}`;
-    // Pass AI config from scope if available for automatic polishing
+    const wfTitle = workflow.title || `Workflow from session ${sessionId}`;
+    // Pass AI config from scope if available for automatic polishing (still DRAFT only)
     const aiConfig = scope?.aiConfig as AIConfig | undefined;
     const sopContent = await this.sopDraftGenerator.generateSopDraft(
       wfTitle,
@@ -265,31 +270,31 @@ export class AgentSessionsController {
       aiConfig,
     );
 
-    let sop: { id: string; status: string } | null = null;
+    let sop: { id: string; status: string };
     try {
-      // Only attempt create if we have a persisted workflow id
-      if (workflow?.id) {
-        sop = await clientPrisma.sopDocument.create({
-          data: {
-            workflowId: workflow.id,
-            title: sopContent.title,
-            status: 'DRAFT',
-            content: sopContent as unknown as Prisma.InputJsonValue,
-          },
-        });
-      }
+      sop = await clientPrisma.sopDocument.create({
+        data: {
+          workflowId: workflow.id,
+          title: sopContent.title,
+          status: 'DRAFT', // never auto-publish
+          content: sopContent as unknown as Prisma.InputJsonValue,
+        },
+      });
     } catch (err) {
       console.error('[AgentSessionsController] sopDocument create failed for session', sessionId, err);
+      throw new InternalServerErrorException(
+        `Failed to persist SOP DRAFT for session ${sessionId}`,
+      );
     }
 
     return {
-      sopDocumentId: sop?.id,
-      workflowId: workflow?.id,
+      sopDocumentId: sop.id,
+      workflowId: workflow.id,
       sessionId,
-      status: sop?.status || 'DRAFT',
+      status: sop.status,
       sop: sopContent,
       clientId: scope?.clientId,
-      persisted: !!sop,
+      persisted: true,
     };
   }
 
@@ -307,7 +312,7 @@ export class AgentSessionsController {
     });
 
     if (!workflow) {
-      return { sessionId, message: 'No timeline found for session' };
+      throw new NotFoundException(`No timeline found for session ${sessionId}`);
     }
 
     return {
@@ -332,7 +337,7 @@ export class AgentSessionsController {
     });
 
     if (!workflow) {
-      return { sessionId, message: 'No SOP found for session' };
+      throw new NotFoundException(`No SOP found for session ${sessionId}`);
     }
 
     const sop = await clientPrisma.sopDocument.findFirst({
@@ -340,7 +345,7 @@ export class AgentSessionsController {
     });
 
     if (!sop) {
-      return { sessionId, workflowId: workflow.id, message: 'No SOP draft' };
+      throw new NotFoundException(`No SOP draft for session ${sessionId}`);
     }
 
     return {
@@ -364,9 +369,9 @@ export class AgentSessionsController {
     const clientPrisma = req.clientPrisma!;
 
     const sop = await clientPrisma.sopDocument.findUnique({ where: { id } });
-    if (!sop) throw new Error('SOP not found');
+    if (!sop) throw new NotFoundException('SOP not found');
     if (sop.status !== 'DRAFT' && sop.status !== 'IN_REVIEW') {
-      throw new Error('Can only edit SOPs in DRAFT or IN_REVIEW status');
+      throw new BadRequestException('Can only edit SOPs in DRAFT or IN_REVIEW status');
     }
 
     const updated = await clientPrisma.sopDocument.update({
@@ -395,9 +400,9 @@ export class AgentSessionsController {
     const clientPrisma = req.clientPrisma!;
 
     const sop = await clientPrisma.sopDocument.findUnique({ where: { id } });
-    if (!sop) throw new Error('SOP not found');
+    if (!sop) throw new NotFoundException('SOP not found');
     if (sop.status !== 'DRAFT') {
-      throw new Error('Can only submit SOPs that are in DRAFT status');
+      throw new BadRequestException('Can only submit SOPs that are in DRAFT status');
     }
 
     const updated = await clientPrisma.sopDocument.update({
@@ -423,13 +428,13 @@ export class AgentSessionsController {
       !perms.includes('REVIEW_SOP') &&
       !['REVIEWER', 'CLIENT_ADMIN'].includes(role)
     ) {
-      throw new Error('Insufficient permissions to approve SOP');
+      throw new ForbiddenException('Insufficient permissions to approve SOP');
     }
 
     const sop = await clientPrisma.sopDocument.findUnique({ where: { id } });
-    if (!sop) throw new Error('SOP not found');
+    if (!sop) throw new NotFoundException('SOP not found');
     if (sop.status !== 'IN_REVIEW') {
-      throw new Error('Can only approve SOPs that are IN_REVIEW');
+      throw new BadRequestException('Can only approve SOPs that are IN_REVIEW');
     }
 
     const updated = await clientPrisma.sopDocument.update({
@@ -459,13 +464,13 @@ export class AgentSessionsController {
       !perms.includes('REVIEW_SOP') &&
       !['REVIEWER', 'CLIENT_ADMIN'].includes(role)
     ) {
-      throw new Error('Insufficient permissions to reject SOP');
+      throw new ForbiddenException('Insufficient permissions to reject SOP');
     }
 
     const sop = await clientPrisma.sopDocument.findUnique({ where: { id } });
-    if (!sop) throw new Error('SOP not found');
+    if (!sop) throw new NotFoundException('SOP not found');
     if (sop.status !== 'IN_REVIEW' && sop.status !== 'DRAFT') {
-      throw new Error('Can only reject SOPs that are IN_REVIEW or DRAFT');
+      throw new BadRequestException('Can only reject SOPs that are IN_REVIEW or DRAFT');
     }
 
     const currentContent =
