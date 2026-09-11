@@ -174,32 +174,7 @@ fi
 ok "acme client id = $ACME_ID"
 
 AUTH_FILE="apps/api-server/src/modules/auth/auth.service.ts"
-python3 - "$AUTH_FILE" "$ACME_ID" <<'PY'
-import re, sys
-path, acme_id = sys.argv[1], sys.argv[2]
-with open(path, "r", encoding="utf-8") as f:
-    src = f.read()
-new_src, n = re.subn(
-    r"(const resolved = \{\s*clientId:\s*')[0-9a-fA-F-]{36}('")",
-    r"\g<1>" + acme_id + r"\2",
-    src,
-    count=1,
-    flags=re.DOTALL,
-)
-if n == 0:
-    new_src, n = re.subn(
-        r"(clientId:\s*')[0-9a-fA-F-]{36}('")",
-        r"\g<1>" + acme_id + r"\2",
-        src,
-        count=1,
-    )
-if n == 0:
-    print("WARN: could not patch " + path + "; set clientId manually to " + acme_id, file=sys.stderr)
-    sys.exit(0)
-with open(path, "w", encoding="utf-8") as f:
-    f.write(new_src)
-print("patched " + path)
-PY
+python3 "$ROOT/scripts/patch-auth-client-id.py" "$AUTH_FILE" "$ACME_ID"
 ok "auth.service.ts clientId synced"
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
