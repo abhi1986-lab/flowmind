@@ -30,7 +30,9 @@
     "test:cov": "npm run test:cov -w api-server",
     "test:cov:check": "npm run test:cov:check -w api-server",
     "test:cov:gate02": "npm run test:cov:gate02 -w api-server",
-    "test:cov:gate03": "npm run test:cov:gate03 -w api-server"
+    "test:cov:gate03": "npm run test:cov:gate03 -w api-server",
+    "test:cov:m1": "npm run test:cov:m1 -w api-server",
+    "test:cov:m1:check": "npm run test:cov:m1:check -w api-server"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
