@@ -743,11 +743,13 @@ function createWindow() {
         <div id="error" style="color:#f87171;min-height:1em;font-weight:bold"></div>
 
         <p class="hint">
+          <b>Visible consent:</b> recording only runs after you click <b>Start Session</b>. Stop anytime.<br/><br/>
           <b>Captures:</b> apps, URLs, clicks, Tab/Enter/Esc,
           and (if Intent on) <b>committed text + pastes</b> for SOP context.<br/><br/>
           This is <b>not keylogging</b>: we never store per-key events; only snapshots on commit/paste.
+          Declared text only on TEXT_INPUT / PASTE_INPUT / USER_NOTE (Gate 0.3).<br/><br/>
           Grant <b>Accessibility</b> + <b>Input Monitoring</b>. FlowMind’s window is ignored.<br/><br/>
-          If ChatGPT hides text from Accessibility, paste prompts or add a User Note.
+          Demo spine: Record → Stop → Build Timeline → Generate SOP Draft → Open Viewer (human approve).
         </p>
 
         <script>
@@ -841,14 +843,15 @@ function createWindow() {
               await apiCall('POST', '/agent/sessions/' + currentSessionId + '/stop');
               isRecording = false; updateUI();
               window.flowmind.stopRecording();
-            } catch (e) {}
+            } catch (e) { showError(e.message || e); }
           };
           function sendEvent(eventObj) {
             if (!currentSessionId || !isRecording) return;
             apiCall('POST', '/agent/events/batch', {
               sessionId: currentSessionId,
               events: [eventObj]
-            }).then(() => { eventCount++; updateUI(); }).catch(() => {});
+            }).then(() => { eventCount++; updateUI(); })
+              .catch((e) => { showError(e.message || e); });
           }
           $('noteBtn').onclick = () => {
             const note = $('noteInput').value.trim();
@@ -863,14 +866,27 @@ function createWindow() {
             });
             $('noteInput').value = '';
           };
+          // M1 spine: surface build-timeline success/failure (no silent catch)
           $('timelineBtn').onclick = async () => {
-            try { await apiCall('POST', '/agent/sessions/' + currentSessionId + '/build-timeline'); } catch (e) {}
+            if (!currentSessionId) return;
+            try {
+              const data = await apiCall('POST', '/agent/sessions/' + currentSessionId + '/build-timeline');
+              if (!data.persisted || !data.workflowId) {
+                showError('Timeline was not persisted — check API / client DB');
+              }
+            } catch (e) { showError(e.message || e); }
           };
           $('sopBtn').onclick = async () => {
-            try { await apiCall('POST', '/agent/sessions/' + currentSessionId + '/generate-sop-draft'); } catch (e) {}
+            if (!currentSessionId) return;
+            try {
+              const data = await apiCall('POST', '/agent/sessions/' + currentSessionId + '/generate-sop-draft');
+              if (data.status !== 'DRAFT' || !data.sopDocumentId) {
+                showError('SOP DRAFT was not persisted — human approve path needs a draft id');
+              }
+            } catch (e) { showError(e.message || e); }
           };
           $('viewerBtn').onclick = () => {
-            alert('Open http://localhost:3000/sop-viewer?sessionId=' + currentSessionId);
+            alert('Open http://localhost:3000/sop-viewer?sessionId=' + currentSessionId + ' — review DRAFT then human approve');
           };
 
           window.flowmind.onActiveWindowChanged((data) => {
