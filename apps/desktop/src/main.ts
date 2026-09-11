@@ -1,1 +1,1 @@
-file:///workspace/uploads/main_ts_only.txt
+@/workspace/uploads/main_ts_only.txt
