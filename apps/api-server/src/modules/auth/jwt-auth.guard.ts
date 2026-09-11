@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { AuthenticatedRequest } from '../client-resolver/client-resolver.guard';
 import type { JwtPayload } from '@flowmind/shared-types';
+import { getJwtSecret } from '../../common/auth/jwt-secret';
 
 // Use jsonwebtoken directly to avoid Nest JwtService DI issues when running via tsx in this monorepo setup.
 import * as jwt from 'jsonwebtoken';
@@ -25,7 +26,7 @@ export class JwtAuthGuard implements CanActivate {
     const token = authHeader.substring(7);
 
     try {
-      const payload = jwt.verify(token, 'dev-super-secret-change-in-real-env') as JwtPayload;
+      const payload = jwt.verify(token, getJwtSecret()) as JwtPayload;
       req.user = payload;
       return true;
     } catch (err) {
