@@ -5,6 +5,7 @@ import { Pool } from 'pg';
 
 /**
  * Singleton Prisma client for the shared CONTROL PLANE only.
+ * Uses control schema (@prisma/client) — no Session/Event/SOP models.
  * Never use for client operational data.
  */
 @Injectable()
