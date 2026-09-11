@@ -26,7 +26,10 @@
     "dev:setup": "bash scripts/dev-up.sh --no-start",
     "dev:down": "bash scripts/dev-down.sh",
     "dev:down:infra": "bash scripts/dev-down.sh --infra",
-    "typecheck": "npm run typecheck --workspaces --if-present || npx tsc -p apps/api-server/tsconfig.json --noEmit"
+    "typecheck": "npm run typecheck --workspaces --if-present || npx tsc -p apps/api-server/tsconfig.json --noEmit",
+    "test:cov": "npm run test:cov -w api-server",
+    "test:cov:check": "npm run test:cov:check -w api-server",
+    "test:cov:gate02": "npm run test:cov:gate02 -w api-server"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
