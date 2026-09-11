@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Event } from '@prisma/client';
+import { Event } from '@prisma/client-data';
 
 export interface WorkflowStep {
   stepNo: number;
