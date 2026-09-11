@@ -29,6 +29,7 @@ export interface AuthenticatedRequest extends Request {
  * 2. Validate that JWT payload.client_id EXACTLY matches the resolved client.
  *    -> If mismatch: hard reject (this is the primary isolation enforcement).
  * 3. Attach fully validated AccessScope to request (for services + repos).
+ * 4. Resolve db_connection_ref → runtime URL via SecretRefsService, then open client Prisma.
  *
  * Every controller that touches client data should use:
  * @UseGuards(AuthGuard, ClientResolverGuard, PermissionGuard?)
@@ -62,11 +63,15 @@ export class ClientResolverGuard implements CanActivate {
       const prismaMod = require('../../common/prisma/client-prisma.factory');
       // @ts-ignore
       const controlMod = require('../../common/prisma/control-prisma.service');
+      // @ts-ignore
+      const secretsMod = require('../../common/secrets/secret-refs.service');
       const ControlPrismaService = controlMod.ControlPrismaService;
       const ClientResolverService = resolverMod.ClientResolverService;
       const ClientPrismaFactory = prismaMod.ClientPrismaFactory;
+      const SecretRefsService = secretsMod.SecretRefsService;
       const controlPrisma = new ControlPrismaService();
-      clientResolver = new ClientResolverService(controlPrisma);
+      const secretRefs = new SecretRefsService();
+      clientResolver = new ClientResolverService(controlPrisma, secretRefs);
       prismaFactory = new ClientPrismaFactory();
     }
     const resolved = await clientResolver.resolveFromRequest(req);
@@ -92,10 +97,13 @@ export class ClientResolverGuard implements CanActivate {
       route: resolved.route,
     });
 
-    // Attach client data plane PrismaClient (key for Client Data Plane isolation + Session/Event backbone)
-    req.clientPrisma = prismaFactory.getPrismaClient(
-      resolved.route.dbConnectionRef,
-    );
+    // Attach client data plane PrismaClient using *resolved* URL (never the raw ref)
+    if (!scope.clientDbUrl) {
+      throw new ForbiddenException(
+        `Unable to resolve client DB URL for '${resolved.slug}'.`,
+      );
+    }
+    req.clientPrisma = prismaFactory.getPrismaClient(scope.clientDbUrl);
     req.accessScope = scope;
 
     return true;
