@@ -5,7 +5,8 @@ import { Pool } from 'pg';
 
 /**
  * Per-client PrismaClient factory for the Client Data Plane.
- * Uses the dbConnectionRef from ClientRoute to connect to the correct isolated client DB.
+ * Expects a *resolved* Postgres URL (from SecretRefsService), never a raw
+ * ClientRoute.db_connection_ref like "client-a-db".
  * Uses the CLIENT schema client (@prisma/client-data) — never the control schema.
  * This is the core of "Client Data Plane" isolation.
  */
