@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - scripts/m1-spine.patch.part0
-      - scripts/m1-spine.patch.part1
-      - scripts/m1-spine.patch.part2
+      - scripts/m1-spine.patch.b64.part0
+      - scripts/m1-spine.patch.b64.part1
+      - scripts/m1-spine.patch.b64.part2
       - .github/workflows/m1-spine-bootstrap.yml
     branches: [feat/m1-thin-spine-record-timeline]
 jobs:
@@ -18,13 +18,13 @@ jobs:
         with:
           ref: feat/m1-thin-spine-record-timeline
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Assemble and apply M1 spine patch
+      - name: Decode gzip patch and apply
         run: |
           set -euo pipefail
-          if [ ! -f scripts/m1-spine.patch.part0 ]; then echo "no parts"; exit 0; fi
-          cat scripts/m1-spine.patch.part0 scripts/m1-spine.patch.part1 scripts/m1-spine.patch.part2 > scripts/m1-spine.patch
+          if [ ! -f scripts/m1-spine.patch.b64.part0 ]; then echo "no parts"; exit 0; fi
+          cat scripts/m1-spine.patch.b64.part0 scripts/m1-spine.patch.b64.part1 scripts/m1-spine.patch.b64.part2 | base64 -d | gzip -d > scripts/m1-spine.patch
           git apply scripts/m1-spine.patch
-          rm -f scripts/m1-spine.patch scripts/m1-spine.patch.part0 scripts/m1-spine.patch.part1 scripts/m1-spine.patch.part2 .github/workflows/m1-spine-bootstrap.yml
+          rm -f scripts/m1-spine.patch scripts/m1-spine.patch.b64.part0 scripts/m1-spine.patch.b64.part1 scripts/m1-spine.patch.b64.part2 .github/workflows/m1-spine-bootstrap.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
