@@ -1,0 +1,29 @@
+name: m1-spine-bootstrap
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/m1-spine.patch
+      - .github/workflows/m1-spine-bootstrap.yml
+    branches: [feat/m1-thin-spine-record-timeline]
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/m1-thin-spine-record-timeline
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply M1 spine patch
+        run: |
+          set -euo pipefail
+          if [ ! -f scripts/m1-spine.patch ]; then echo "no patch"; exit 0; fi
+          git apply scripts/m1-spine.patch
+          rm -f scripts/m1-spine.patch .github/workflows/m1-spine-bootstrap.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(m1): apply spine reliability patch (controller, tests, desktop)"
+          git push
