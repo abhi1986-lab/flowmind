@@ -1,0 +1,40 @@
+name: restore-electron-main-b64
+on:
+  push:
+    paths:
+      - '.github/patches/electron-main.part*.b64'
+      - '.github/workflows/restore-electron-main-b64.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/electron-desktop-launch-consent
+          fetch-depth: 2
+      - name: Decode gzip+base64 parts into apps/desktop/src/main.ts
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          import base64, gzip, glob, pathlib
+          parts = sorted(glob.glob('.github/patches/electron-main.part*.b64'))
+          assert parts, 'missing b64 parts'
+          b64 = ''.join(pathlib.Path(p).read_text().split())
+          data = gzip.decompress(base64.b64decode(b64))
+          pathlib.Path('apps/desktop/src/main.ts').write_bytes(data)
+          text = data.decode()
+          assert 'active-win unavailable' in text
+          assert "setAlwaysOnTop(true, 'floating')" in text
+          assert 'PLACEHOLDER_LOAD_FROM_' not in text
+          print('wrote', len(data), 'bytes')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/desktop/src/main.ts
+          git rm -f .github/workflows/restore-electron-main-b64.yml .github/workflows/restore-electron-main.yml \
+            .github/patches/electron-main.part*.b64 .github/patches/electron-desktop-main.patch || true
+          git commit -m "fix(desktop): installable Electron launch + consent banner + INSTALL.md"
+          git push origin HEAD:fix/electron-desktop-launch-consent
