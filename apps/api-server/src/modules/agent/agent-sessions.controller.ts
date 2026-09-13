@@ -17,7 +17,10 @@ import { ClientResolverGuard } from '../client-resolver/client-resolver.guard';
 import type { AuthenticatedRequest } from '../client-resolver/client-resolver.guard';
 import { TimelineBuilder, type WorkflowStep } from './timeline.builder';
 import { SopDraftGenerator } from './sop.generator';
-import { sanitizeEventBatch } from './event-metadata.sanitizer';
+import {
+  EventMetadataSanitizerError,
+  sanitizeEventBatch,
+} from './event-metadata.sanitizer';
 import { AIConfig } from '@flowmind/ai-providers';
 import type { Prisma } from '@prisma/client-data';
 
@@ -41,7 +44,6 @@ export class AgentSessionsController {
     const scope = req.accessScope;
     return {
       clientId: scope?.clientId,
-      // In real: return capture policy from client DB (screenshots enabled, blocklists)
       capturePolicy: {
         screenshotsEnabled: true,
         appBlocklist: ['1Password', 'Bitwarden'],
@@ -61,7 +63,6 @@ export class AgentSessionsController {
     const clientPrisma = req.clientPrisma!;
     const actorUserId = scope?.actorUserId || req.user?.sub || 'demo-user';
 
-    // Ensure demo user exists in this client DB (backbone slice; full users later)
     await clientPrisma.user.upsert({
       where: { id: actorUserId },
       update: {},
@@ -136,10 +137,18 @@ export class AgentSessionsController {
     const clientPrisma = req.clientPrisma!;
     const sessionId = body.sessionId;
     // Gate 0.3: reject metadata.value (+ cousins) except TEXT_INPUT/PASTE_INPUT/USER_NOTE
-    const events = sanitizeEventBatch(body.events || []);
+    // Fail-closed as 400 Bad Request (not 500) when the batch violates text policy.
+    let events: Array<Record<string, unknown>>;
+    try {
+      events = sanitizeEventBatch(body.events || []);
+    } catch (err) {
+      if (err instanceof EventMetadataSanitizerError) {
+        throw new BadRequestException(err.message);
+      }
+      throw err;
+    }
 
     if (sessionId && events.length > 0) {
-      // Basic batch insert for backbone
       await clientPrisma.event.createMany({
         data: events.map((e: Record<string, unknown>, idx: number) => ({
           sessionId,
@@ -170,7 +179,6 @@ export class AgentSessionsController {
     const scope = req.accessScope;
     const clientPrisma = req.clientPrisma!;
 
-    // M1 spine: require a real client-DB session before timeline persistence
     const session = await clientPrisma.session.findUnique({ where: { id: sessionId } });
     if (!session) {
       throw new NotFoundException(`Session ${sessionId} not found`);
@@ -183,7 +191,6 @@ export class AgentSessionsController {
 
     const steps = this.timelineBuilder.buildTimeline(events);
 
-    // Fail hard — demo path needs Workflow persisted in client data plane
     let workflow: { id: string };
     try {
       workflow = await clientPrisma.workflow.upsert({
@@ -228,14 +235,12 @@ export class AgentSessionsController {
       throw new NotFoundException(`Session ${sessionId} not found`);
     }
 
-    // Get or build the workflow for this session (client data plane only)
     let workflow = await clientPrisma.workflow.findFirst({
       where: { sourceSessionId: sessionId },
     });
 
     let stepsForSop: WorkflowStep[] = [];
     if (!workflow) {
-      // Auto-build timeline if not present (lean demo path)
       const events = await clientPrisma.event.findMany({
         where: { sessionId },
         orderBy: { sequenceNo: 'asc' },
@@ -262,7 +267,6 @@ export class AgentSessionsController {
 
     const steps = stepsForSop;
     const wfTitle = workflow.title || `Workflow from session ${sessionId}`;
-    // Pass AI config from scope if available for automatic polishing (still DRAFT only)
     const aiConfig = scope?.aiConfig as AIConfig | undefined;
     const sopContent = await this.sopDraftGenerator.generateSopDraft(
       wfTitle,
@@ -276,7 +280,7 @@ export class AgentSessionsController {
         data: {
           workflowId: workflow.id,
           title: sopContent.title,
-          status: 'DRAFT', // never auto-publish
+          status: 'DRAFT',
           content: sopContent as unknown as Prisma.InputJsonValue,
         },
       });
@@ -298,7 +302,6 @@ export class AgentSessionsController {
     };
   }
 
-  // A. SOP read APIs (lean)
   @Get('sessions/:id/timeline')
   async getTimeline(
     @Param('id') sessionId: string,
@@ -358,7 +361,19 @@ export class AgentSessionsController {
     };
   }
 
-  // B. SOP review APIs (lean, require basic reviewer role/permission for approve/reject)
+  /** Draft edit / submit: CONTRIBUTOR+ or RECORD_WORKFLOW / REVIEW_SOP. VIEWER denied. */
+  private assertCanEditOrSubmitSop(scope: AuthenticatedRequest['accessScope']): void {
+    const perms = scope?.permissions || [];
+    const role = scope?.role || '';
+    if (
+      !perms.includes('RECORD_WORKFLOW') &&
+      !perms.includes('REVIEW_SOP') &&
+      !['CONTRIBUTOR', 'REVIEWER', 'CLIENT_ADMIN'].includes(role)
+    ) {
+      throw new ForbiddenException('Insufficient permissions to edit or submit SOP');
+    }
+  }
+
   @Patch('sop-documents/:id')
   async updateSopDraft(
     @Param('id') id: string,
@@ -366,6 +381,7 @@ export class AgentSessionsController {
     @Req() req: AuthenticatedRequest,
   ) {
     const scope = req.accessScope;
+    this.assertCanEditOrSubmitSop(scope);
     const clientPrisma = req.clientPrisma!;
 
     const sop = await clientPrisma.sopDocument.findUnique({ where: { id } });
@@ -397,6 +413,7 @@ export class AgentSessionsController {
     @Req() req: AuthenticatedRequest,
   ) {
     const scope = req.accessScope;
+    this.assertCanEditOrSubmitSop(scope);
     const clientPrisma = req.clientPrisma!;
 
     const sop = await clientPrisma.sopDocument.findUnique({ where: { id } });

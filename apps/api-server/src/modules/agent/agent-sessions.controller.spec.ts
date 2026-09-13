@@ -127,7 +127,7 @@ describe('AgentSessionsController (M1 thin spine)', () => {
     expect(stopRes.status).toBe('STOPPED');
   });
 
-  it('uploadEvents rejects metadata.value on APP_CHANGED (Gate 0.3)', async () => {
+  it('uploadEvents rejects metadata.value on APP_CHANGED as 400 BadRequest (Gate 0.3)', async () => {
     await expect(
       controller.uploadEvents(mockReq, {
         sessionId: 'sess1',
@@ -139,7 +139,23 @@ describe('AgentSessionsController (M1 thin spine)', () => {
           },
         ],
       }),
-    ).rejects.toThrow(/metadata\.value/);
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(mockReq.clientPrisma.event.createMany).not.toHaveBeenCalled();
+  });
+
+  it('uploadEvents rejects metadata.focusedValue on APP_CHANGED as 400 BadRequest', async () => {
+    await expect(
+      controller.uploadEvents(mockReq, {
+        sessionId: 'sess1',
+        events: [
+          {
+            sequenceNo: 1,
+            eventType: 'APP_CHANGED',
+            metadata: { focusedValue: 'smuggled field' },
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(mockReq.clientPrisma.event.createMany).not.toHaveBeenCalled();
   });
 
@@ -345,6 +361,70 @@ describe('AgentSessionsController (M1 thin spine)', () => {
       await expect(
         controller.updateSopDraft('s1', { title: 'New' }, mockReq),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('updateSopDraft forbids VIEWER without write perms', async () => {
+      mockReq.accessScope = {
+        clientId: 'test-client',
+        role: 'VIEWER',
+        permissions: ['VIEW_SESSIONS'],
+      };
+      await expect(
+        controller.updateSopDraft('s1', { title: 'New' }, mockReq),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockReq.clientPrisma.sopDocument.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('updateSopDraft allows CONTRIBUTOR', async () => {
+      mockReq.accessScope = {
+        clientId: 'test-client',
+        role: 'CONTRIBUTOR',
+        permissions: ['RECORD_WORKFLOW'],
+      };
+      mockReq.clientPrisma.sopDocument.findUnique.mockResolvedValue({
+        id: 's1',
+        status: 'DRAFT',
+        title: 'Old',
+        content: {},
+      });
+      mockReq.clientPrisma.sopDocument.update.mockResolvedValue({
+        id: 's1',
+        status: 'DRAFT',
+        title: 'New',
+        content: {},
+      });
+      const result = await controller.updateSopDraft('s1', { title: 'New' }, mockReq);
+      expect(result.status).toBe('DRAFT');
+    });
+
+    it('submitForReview forbids VIEWER', async () => {
+      mockReq.accessScope = {
+        clientId: 'test-client',
+        role: 'VIEWER',
+        permissions: ['VIEW_SESSIONS'],
+      };
+      await expect(controller.submitForReview('s1', mockReq)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(mockReq.clientPrisma.sopDocument.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('submitForReview allows CLIENT_ADMIN via role gate', async () => {
+      mockReq.accessScope = {
+        clientId: 'test-client',
+        role: 'CLIENT_ADMIN',
+        permissions: [],
+      };
+      mockReq.clientPrisma.sopDocument.findUnique.mockResolvedValue({
+        id: 's1',
+        status: 'DRAFT',
+      });
+      mockReq.clientPrisma.sopDocument.update.mockResolvedValue({
+        id: 's1',
+        status: 'IN_REVIEW',
+      });
+      const result = await controller.submitForReview('s1', mockReq);
+      expect(result.status).toBe('IN_REVIEW');
     });
   });
 });
