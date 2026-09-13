@@ -1,1 +1,1 @@
-RESTORING
+file:///workspace/content0.txt
