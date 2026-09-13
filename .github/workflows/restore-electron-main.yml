@@ -1,0 +1,41 @@
+name: restore-electron-main
+on:
+  push:
+    paths:
+      - '.github/patches/electron-desktop-main.patch'
+      - '.github/workflows/restore-electron-main.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/electron-desktop-launch-consent
+          fetch-depth: 5
+      - name: Restore main.ts from pre-placeholder + apply patch
+        run: |
+          set -euo pipefail
+          # If file is still the placeholder, restore base then patch
+          if grep -q 'PLACEHOLDER_LOAD_FROM_' apps/desktop/src/main.ts 2>/dev/null; then
+            echo "Restoring base main.ts from parent of placeholder commit"
+            git checkout HEAD~1 -- apps/desktop/src/main.ts
+            patch -p1 < .github/patches/electron-desktop-main.patch
+          elif ! grep -q 'active-win unavailable' apps/desktop/src/main.ts; then
+            echo "Applying patch onto current main.ts"
+            patch -p1 < .github/patches/electron-desktop-main.patch
+          else
+            echo "main.ts already has expected soft-deps changes; nothing to do"
+            exit 0
+          fi
+          grep -q 'active-win unavailable' apps/desktop/src/main.ts
+          grep -q "setAlwaysOnTop(true, 'floating')" apps/desktop/src/main.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/desktop/src/main.ts
+          # Remove one-shot restore helpers after success
+          git rm -f .github/workflows/restore-electron-main.yml .github/patches/electron-desktop-main.patch || true
+          git commit -m "fix(desktop): installable Electron launch + consent banner + INSTALL.md"
+          git push origin HEAD:fix/electron-desktop-launch-consent

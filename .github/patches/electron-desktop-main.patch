@@ -1,0 +1,81 @@
+--- a/apps/desktop/src/main.ts
++++ b/apps/desktop/src/main.ts
+@@ -20,8 +20,16 @@
+ import * as path from 'path';
+ import { spawn } from 'child_process';
+ 
+-// @ts-ignore
+-const activeWin = require('active-win');
++type ActiveWinFn = () => Promise<{ owner?: { name?: string }; title?: string; app?: string } | undefined>;
++let activeWin: ActiveWinFn | null = null;
++try {
++  // Optional native module — must not block Electron window launch on demo boxes.
++  // eslint-disable-next-line @typescript-eslint/no-var-requires
++  activeWin = require('active-win') as ActiveWinFn;
++} catch (e) {
++  console.warn('[capture] active-win unavailable — app/window polling limited:', (e as Error).message);
++  activeWin = null;
++}
+ 
+ type UiSnapshot = {
+   appName: string;
+@@ -199,10 +207,12 @@
+   let windowTitle = '';
+ 
+   try {
+-    const win = await activeWin();
+-    if (win) {
+-      appName = win.owner?.name || (win as any).app || 'Unknown';
+-      windowTitle = win.title || '';
++    if (activeWin) {
++      const win = await activeWin();
++      if (win) {
++        appName = win.owner?.name || (win as any).app || 'Unknown';
++        windowTitle = win.title || '';
++      }
+     }
+   } catch (err) {
+     console.error('active-win error:', (err as Error)?.message || err);
+@@ -676,8 +686,11 @@
+ 
+ function createWindow() {
+   mainWindow = new BrowserWindow({
+-    width: 480,
+-    height: 720,
++    width: 520,
++    height: 760,
++    minWidth: 420,
++    minHeight: 640,
++    alwaysOnTop: true,
+     webPreferences: {
+       preload: path.join(__dirname, 'preload.js'),
+       contextIsolation: true,
+@@ -685,6 +698,8 @@
+     },
+     title: 'FlowMind Recorder',
+   });
++  // Keep the consent/RECORDING chrome visible during demos (user can unpin via OS).
++  mainWindow.setAlwaysOnTop(true, 'floating');
+ 
+   const html = `
+     <!doctype html>
+@@ -720,8 +735,9 @@
+         <h1>FlowMind — Activity Capture v3</h1>
+         <div id="loginStatus" class="status idle">Not logged in</div>
+         <button id="loginBtn">Login (demo contributor@acme.test)</button>
+-        <div id="recBanner">● RECORDING — capture active (visible consent)</div>
+-        <div id="consentStrip">Visible consent: recording is ON. Only apps/URLs/clicks/keys (Tab/Enter/Esc) + optional committed text. Stop anytime.</div>
++        <div id="recBanner" role="status" aria-live="polite">● RECORDING — capture active (visible consent)</div>
++        <div id="consentStrip" role="status">Visible consent: recording is ON. Only apps/URLs/clicks/keys (Tab/Enter/Esc) + optional committed text. Stop anytime.</div>
++        <div id="idleConsent" style="padding:8px 12px;border-radius:4px;margin:6px 0;background:#1e2937;border:1px solid #475569;color:#cbd5e1;font-size:12px;font-weight:600">Consent: capture is OFF until you click Start Session. A red RECORDING banner appears while active. No hidden recording.</div>
+ 
+         <div class="section">
+           <div>Session: <span id="sessionId">-</span></div>
+@@ -851,6 +867,7 @@
+             $('loginBtn').textContent = loggedIn ? 'Logged in (demo)' : 'Login (demo contributor@acme.test)';
+             $('recBanner').className = isRecording ? 'on' : '';
+             $('consentStrip').className = isRecording ? 'on' : '';
++            try { $('idleConsent').style.display = isRecording ? 'none' : 'block'; } catch (e) {}
+             const can = loggedIn && !!currentSessionId;
+             $('startBtn').disabled = !can || isRecording;
+             $('stopBtn').disabled = !can || !isRecording;
