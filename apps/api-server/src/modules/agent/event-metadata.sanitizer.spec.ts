@@ -7,6 +7,10 @@ import {
   stripDeclaredTextMetadata,
   TEXT_BEARING_EVENT_TYPES,
 } from './event-metadata.sanitizer';
+import {
+  isDeclaredTextMetadataKey,
+  isKeyloggingMetadataKey,
+} from '@flowmind/shared-types';
 
 describe('event-metadata.sanitizer (Gate 0.3)', () => {
   describe('isTextBearingEventType', () => {
@@ -49,6 +53,17 @@ describe('event-metadata.sanitizer (Gate 0.3)', () => {
             metadata: { value: 'password123' },
           }),
         ).toThrow(/metadata\.value/);
+      }
+    });
+
+    it('rejects metadata.focusedValue on non-text events (Gate 0.3 follow-up)', () => {
+      for (const eventType of ['APP_CHANGED', 'WINDOW_CHANGED', 'MOUSE_CLICK', 'UI_ACTION']) {
+        expect(() =>
+          sanitizeEventForIngestion({
+            eventType,
+            metadata: { focusedValue: 'smuggled field contents' },
+          }),
+        ).toThrow(/metadata\.focusedValue/);
       }
     });
 
@@ -150,12 +165,22 @@ describe('event-metadata.sanitizer (Gate 0.3)', () => {
     });
   });
 
+  describe('shared policy helpers', () => {
+    it('classifies focusedValue as declared text and typedText as keylogging', () => {
+      expect(isDeclaredTextMetadataKey('focusedValue')).toBe(true);
+      expect(isDeclaredTextMetadataKey('url')).toBe(false);
+      expect(isKeyloggingMetadataKey('typedText')).toBe(true);
+      expect(isKeyloggingMetadataKey('value')).toBe(false);
+    });
+  });
+
   describe('stripDeclaredTextMetadata (desktop helper)', () => {
-    it('strips value cousins on APP_CHANGED but keeps structural keys', () => {
+    it('strips value cousins + focusedValue on APP_CHANGED but keeps structural keys', () => {
       const cleaned = stripDeclaredTextMetadata('APP_CHANGED', {
         value: 'secret',
         text: 'secret',
         note: 'nope',
+        focusedValue: 'field leak',
         url: 'https://ok',
         actionHint: 'click Submit',
       });
@@ -169,7 +194,7 @@ describe('event-metadata.sanitizer (Gate 0.3)', () => {
       expect(
         stripDeclaredTextMetadata('TEXT_INPUT', { text: 'keep', url: 'https://x' }),
       ).toEqual({ text: 'keep', url: 'https://x' });
-      expect(stripDeclaredTextMetadata('USER_NOTE', { note: 'keep' })).toEqual({
+      expect(stripDeclaredTextMetadata('USER_NOTE', { note: 'keep' }).toEqual({
         note: 'keep',
       });
     });
@@ -177,6 +202,16 @@ describe('event-metadata.sanitizer (Gate 0.3)', () => {
     it('returns undefined when nothing remains', () => {
       expect(stripDeclaredTextMetadata('MOUSE_CLICK', { value: 'x' })).toBeUndefined();
       expect(stripDeclaredTextMetadata('APP_CHANGED', undefined)).toBeUndefined();
+    });
+
+    it('strips keylogging keys even on TEXT_INPUT (fail-closed client helper)', () => {
+      expect(
+        stripDeclaredTextMetadata('TEXT_INPUT', {
+          text: 'keep',
+          typedText: 'stream',
+          keystrokes: 'a,b',
+        }),
+      ).toEqual({ text: 'keep' });
     });
   });
 });
