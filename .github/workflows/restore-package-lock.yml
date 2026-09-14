@@ -13,13 +13,22 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Concat lock parts
+      - name: Decode gzip b64 lock
         run: |
           set -euo pipefail
-          cat apps/desktop/lock-parts/package-lock.part* > package-lock.json
-          wc -c package-lock.json
-          test "$(wc -c < package-lock.json)" -eq 673496
-          python3 -c 'import json; from pathlib import Path; lock=json.loads(Path("package-lock.json").read_text()); assert "node_modules/electron-builder" in lock["packages"]; print("lock ok")'
+          python3 - <<'PY'
+          import base64, gzip
+          from pathlib import Path
+          b64 = Path('apps/desktop/lock-parts/package-lock.json.gz.b64').read_text().strip()
+          data = gzip.decompress(base64.b64decode(b64))
+          Path('package-lock.json').write_bytes(data)
+          print(len(data))
+          assert len(data) == 673496
+          import json
+          lock = json.loads(data.decode())
+          assert 'node_modules/electron-builder' in lock['packages']
+          print('lock ok')
+          PY
       - name: Commit restored lockfile
         run: |
           set -euo pipefail
