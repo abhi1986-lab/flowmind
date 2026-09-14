@@ -19,8 +19,13 @@ jobs:
           python3 - <<'PY'
           import base64, gzip
           from pathlib import Path
-          b64 = Path('apps/desktop/lock-parts/package-lock.json.gz.b64').read_text().strip()
-          data = gzip.decompress(base64.b64decode(b64))
+          parts = sorted(Path('apps/desktop/lock-parts').glob('package-lock.json.gz.b64.part*'))
+          single = Path('apps/desktop/lock-parts/package-lock.json.gz.b64')
+          if parts:
+            b64 = ''.join(p.read_text() for p in parts)
+          else:
+            b64 = single.read_text().strip()
+          data = gzip.decompress(base64.b64decode(b64.strip()))
           Path('package-lock.json').write_bytes(data)
           print(len(data))
           assert len(data) == 673496
