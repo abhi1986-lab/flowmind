@@ -22,13 +22,15 @@ jobs:
           import base64, gzip, glob, pathlib
           parts = sorted(glob.glob('.github/patches/electron-main.part*.b64'))
           assert parts, 'missing b64 parts'
-          b64 = ''.join(pathlib.Path(p).read_text().split())
+          print('parts', parts)
+          b64 = ''.join(''.join(pathlib.Path(p).read_text().split()) for p in parts)
           data = gzip.decompress(base64.b64decode(b64))
           pathlib.Path('apps/desktop/src/main.ts').write_bytes(data)
           text = data.decode()
+          assert 'FlowMind Desktop Agent' in text
           assert 'active-win unavailable' in text
           assert "setAlwaysOnTop(true, 'floating')" in text
-          assert 'PLACEHOLDER_LOAD_FROM_' not in text
+          assert 'PLACEHOLDER' not in text
           print('wrote', len(data), 'bytes')
           PY
           git config user.name "github-actions[bot]"
