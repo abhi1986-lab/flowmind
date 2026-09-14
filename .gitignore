@@ -68,3 +68,8 @@ tmp-*/
 .dev-logs/
 .dev-pids/
 apps/api-server/.env
+
+# desktop unit test emit
+apps/desktop/dist-test/
+
+apps/desktop/release/
