@@ -1,1 +1,1 @@
-PLACEHOLDER_LOAD_FROM_/workspace/flowmind-work/flowmind/apps/desktop/src/main.ts
+PLACEHOLDER_WILL_REPLACE
