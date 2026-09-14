@@ -12,8 +12,8 @@
     "package": "npm run build && electron-builder --dir",
     "dist:linux": "npm run build && electron-builder --linux dir",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.json && tsc -p tsconfig.test.json && node --test dist-test/recording-ui.spec.js",
-    "test:cov": "npm test"
+    "test": "tsc -p tsconfig.json && tsc -p tsconfig.test.json && node --test dist-test/capture-privacy.spec.js dist-test/recording-ui.spec.js",
+    "test:cov": "tsc -p tsconfig.json && tsc -p tsconfig.test.json && node --experimental-test-coverage --test dist-test/capture-privacy.spec.js dist-test/recording-ui.spec.js"
   },
   "dependencies": {
     "electron": "^31.7.7"
