@@ -36,5 +36,5 @@ jobs:
           git add apps/desktop/src/main.ts
           git rm -f .github/workflows/restore-electron-main-b64.yml .github/workflows/restore-electron-main.yml \
             .github/patches/electron-main.part*.b64 .github/patches/electron-desktop-main.patch || true
-          git commit -m "fix(desktop): installable Electron launch + consent banner + INSTALL.md"
+          git commit -m "fix(desktop): restore real capture agent main.ts"
           git push origin HEAD:fix/electron-desktop-launch-consent
