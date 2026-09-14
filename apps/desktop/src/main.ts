@@ -19,3 +19,32 @@
 import { app, BrowserWindow, clipboard, ipcMain } from 'electron';
 import * as path from 'path';
 import { spawn } from 'child_process';
+
+type ActiveWinFn = () => Promise<{ owner?: { name?: string }; title?: string; app?: string } | undefined>;
+let activeWin: ActiveWinFn | null = null;
+try {
+  // Optional native module — must not block Electron window launch on demo boxes.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  activeWin = require('active-win') as ActiveWinFn;
+} catch (e) {
+  console.warn('[capture] active-win unavailable — app/window polling limited:', (e as Error).message);
+  activeWin = null;
+}
+
+type UiSnapshot = {
+  appName: string;
+  windowTitle: string;
+  pageTitle?: string;
+  url?: string;
+  document?: string;
+  focusedRole?: string;
+  focusedName?: string;
+  focusedDescription?: string;
+  focusedValue?: string;
+  /** Non-secure field text for intent capture (on-commit). Not a keystream. */
+  intentText?: string;
+  focusPath?: string;
+  selection?: string;
+  actionHint?: string;
+  fingerprint: string;
+};
