@@ -250,12 +250,21 @@ if [[ "$START_APPS" -eq 1 ]]; then
       cd apps/desktop
       npm run build
     )
+    [[ -f apps/desktop/dist/main.js ]] || die "Desktop build failed: apps/desktop/dist/main.js missing (fix tsconfig / npm run build in apps/desktop)"
     (
       cd apps/desktop
-      nohup npx electron . >"${LOG_DIR}/desktop.log" 2>&1 &
+      # Prefer local electron binary; fall back to npx with the workspace-pinned version.
+      if [[ -x "${ROOT}/node_modules/.bin/electron" ]]; then
+        ELECTRON_BIN="${ROOT}/node_modules/.bin/electron"
+      elif [[ -x "./node_modules/.bin/electron" ]]; then
+        ELECTRON_BIN="./node_modules/.bin/electron"
+      else
+        ELECTRON_BIN="npx --no-install electron"
+      fi
+      nohup ${ELECTRON_BIN} . >"${LOG_DIR}/desktop.log" 2>&1 &
       echo $! >"${PID_DIR}/desktop.pid"
     )
-    ok "Desktop launched (pid $(cat "${PID_DIR}/desktop.pid" 2>/dev/null || echo '?'))"
+    ok "Desktop launched (pid $(cat "${PID_DIR}/desktop.pid" 2>/dev/null || echo '?')) — RECORDING/consent banner shows after Start Session"
   fi
 fi
 

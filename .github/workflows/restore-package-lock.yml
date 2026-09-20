@@ -1,0 +1,48 @@
+name: restore-package-lock
+on:
+  push:
+    branches: [fix/electron-desktop-launch-consent]
+    paths:
+      - 'apps/desktop/lock-parts/**'
+      - '.github/workflows/restore-package-lock.yml'
+  workflow_dispatch:
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode gzip b64 lock
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, gzip
+          from pathlib import Path
+          parts = sorted(Path('apps/desktop/lock-parts').glob('package-lock.json.gz.b64.part*'))
+          single = Path('apps/desktop/lock-parts/package-lock.json.gz.b64')
+          if parts:
+            b64 = ''.join(p.read_text() for p in parts)
+          else:
+            b64 = single.read_text().strip()
+          data = gzip.decompress(base64.b64decode(b64.strip()))
+          Path('package-lock.json').write_bytes(data)
+          print(len(data))
+          assert len(data) == 673496
+          import json
+          lock = json.loads(data.decode())
+          assert 'node_modules/electron-builder' in lock['packages']
+          print('lock ok')
+          PY
+      - name: Commit restored lockfile
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if git diff --cached --quiet; then
+            echo "package-lock.json already correct"
+            exit 0
+          fi
+          git commit -m "fix(desktop): restore real package-lock for electron-builder (npm ci)"
+          git push
